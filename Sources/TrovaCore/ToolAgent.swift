@@ -45,9 +45,11 @@ public struct ToolAgent {
     let maxSteps: Int
 
     public init(store: IndexStore, embedder: EmbeddingProvider?,
-                llm: OpenRouterClient, maxSteps: Int = 8, reranker: Reranker? = nil) {
+                llm: OpenRouterClient, maxSteps: Int = 8, reranker: Reranker? = nil,
+                maxPerThread: Int? = nil) {
         self.store = store
-        self.searcher = Searcher(store: store, embedder: embedder, reranker: reranker)
+        self.searcher = Searcher(store: store, embedder: embedder,
+                                 reranker: reranker, maxPerThread: maxPerThread)
         self.llm = llm
         self.maxSteps = maxSteps
     }

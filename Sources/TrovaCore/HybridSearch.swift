@@ -11,36 +11,46 @@ public struct Searcher {
     let store: IndexStore
     let embedder: EmbeddingProvider?
     let reranker: Reranker?
+    /// Thread başına en fazla sonuç (çeşitlendirme). nil → çeşitlendirme kapalı (davranış aynı).
+    let maxPerThread: Int?
 
     public init(store: IndexStore, embedder: EmbeddingProvider? = nil,
-                reranker: Reranker? = nil) {
+                reranker: Reranker? = nil, maxPerThread: Int? = nil) {
         self.store = store
         self.embedder = embedder
         self.reranker = reranker
+        self.maxPerThread = maxPerThread
     }
 
     public func search(_ query: String, mode: SearchMode,
                        filter: SearchFilter = .init(), limit: Int) throws -> [SearchHit] {
         let allowed = filter.isEmpty ? nil : try store.idsMatching(filter)
-        // Yeniden sıralayıcı varsa daha geniş bir aday havuzu çek; yoksa davranış aynen korunur.
-        let pool = reranker == nil ? limit : max(limit, 40)
+        // Rerank ya da çeşitlendirme açıksa daha geniş bir aday havuzu çek (araştırma: havuz
+        // derinliği sıralamada belirleyici, ~50-100 aralığı). İkisi de kapalıysa davranış aynen korunur.
+        let wantPool = reranker != nil || maxPerThread != nil
+        let pool = wantPool ? max(limit, 60) : limit
         switch mode {
         case .fts:
-            // Kelime araması yeniden sıralanmaz.
-            return try store.search(query: query, filter: filter, limit: limit)
+            // Kelime araması yeniden sıralanmaz; çeşitlendirme için yine de derin havuz çekilir.
+            let hits = try store.search(query: query, filter: filter, limit: pool)
+            return finalize(hits, limit: limit)
 
         case .semantic:
-            guard let embedder else { return try store.search(query: query, filter: filter, limit: limit) }
+            guard let embedder else {
+                return finalize(try store.search(query: query, filter: filter, limit: pool), limit: limit)
+            }
             let ranked = try store.vectorSearch(query: try embedder.embed(query),
                                                 limit: pool, allowedIDs: allowed)
             let meta = try store.hits(forIDs: ranked.map(\.id))
             let hits = ranked.compactMap { hit in
                 meta[hit.id].map { withScore($0, Double(hit.score)) }
             }
-            return try reranked(query, hits, limit: limit)
+            return finalize(try rerankedPool(query, hits, pool: pool), limit: limit)
 
         case .hybrid:
-            guard let embedder else { return try store.search(query: query, filter: filter, limit: limit) }
+            guard let embedder else {
+                return finalize(try store.search(query: query, filter: filter, limit: pool), limit: limit)
+            }
             let ftsHits = try store.search(query: query, filter: filter, limit: max(pool, 50))
             let vecHits = try store.vectorSearch(query: try embedder.embed(query),
                                                  limit: max(pool, 50), allowedIDs: allowed)
@@ -59,14 +69,24 @@ public struct Searcher {
                     mailbox: m.mailbox, date: m.date, snippet: snippet, score: item.score,
                     threadKey: m.threadKey, attachments: m.attachments)
             }
-            return try reranked(query, hits, limit: limit)
+            return finalize(try rerankedPool(query, hits, pool: pool), limit: limit)
         }
     }
 
-    /// Yeniden sıralayıcı varsa adayları LLM ile yeniden sıralar; yoksa olduğu gibi döndürür.
-    private func reranked(_ query: String, _ hits: [SearchHit], limit: Int) throws -> [SearchHit] {
+    /// Yeniden sıralayıcı varsa havuzun tamamını LLM ile yeniden sıralar (çeşitlendirme için
+    /// `limit` yerine `pool` döner); yoksa olduğu gibi bırakır.
+    private func rerankedPool(_ query: String, _ hits: [SearchHit], pool: Int) throws -> [SearchHit] {
         guard let reranker else { return hits }
-        return try reranker.rerank(query: query, candidates: hits, topK: limit)
+        return try reranker.rerank(query: query, candidates: hits, topK: pool)
+    }
+
+    /// Sıralı havuzu son hâline indirger: çeşitlendirme açıksa thread bazında çeşitlendirir,
+    /// değilse ilk `limit` sonucu döndürür.
+    private func finalize(_ hits: [SearchHit], limit: Int) -> [SearchHit] {
+        if let maxPerThread {
+            return ResultDiversifier.diversify(hits, maxPerThread: maxPerThread, limit: limit)
+        }
+        return Array(hits.prefix(limit))
     }
 
     private func withScore(_ hit: SearchHit, _ score: Double) -> SearchHit {

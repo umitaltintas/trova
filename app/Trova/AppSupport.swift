@@ -16,6 +16,19 @@ enum SettingsKeys {
     static let llmModel = "llmModel"
     static let reranking = "reranking"           // AI ile sonuçları yeniden sırala (varsayılan kapalı)
     static let verify = "verify"                  // Yanıt doğrulama / self-critique (varsayılan kapalı)
+    static let diversify = "diversify"            // Sonuçları thread bazında çeşitlendir (varsayılan açık)
+}
+
+/// Çeşitlendirme ayarından thread başına izin verilen sonuç sayısını verir.
+/// Anahtar hiç yazılmamışsa varsayılan AÇIK kabul edilir (yeni kurulumlarda da çeşitli sonuç).
+enum Retrieval {
+    static let perThread = 2
+    static func maxPerThread() -> Int? {
+        let d = UserDefaults.standard
+        let enabled = d.object(forKey: SettingsKeys.diversify) == nil
+            ? true : d.bool(forKey: SettingsKeys.diversify)
+        return enabled ? perThread : nil
+    }
 }
 
 /// Ayarlardan + Keychain'den (yoksa ortam değişkenlerinden) sağlayıcı kurar.

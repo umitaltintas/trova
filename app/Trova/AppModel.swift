@@ -334,7 +334,8 @@ final class AppModel {
                 let embedder = selectedMode == .fts ? nil : Providers.embedder()
                 // Reranking yalnızca anlamsal/hibrit modlarda anlamlıdır.
                 let reranker = selectedMode == .fts ? nil : Providers.reranker()
-                return try Searcher(store: store, embedder: embedder, reranker: reranker)
+                return try Searcher(store: store, embedder: embedder, reranker: reranker,
+                                    maxPerThread: Retrieval.maxPerThread())
                     .search(q, mode: selectedMode, filter: filter, limit: 50)
             }
             isSearching = false
@@ -391,7 +392,8 @@ final class AppModel {
             let run = await background { () -> AgentRun in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 let agent = ToolAgent(store: store, embedder: Providers.embedder(),
-                                      llm: llm, reranker: Providers.reranker())
+                                      llm: llm, reranker: Providers.reranker(),
+                                      maxPerThread: Retrieval.maxPerThread())
                 return try agent.run(q, history: history, cancel: flag, verify: verify) { step in
                     Task { @MainActor in
                         if index < self.conversation.count { self.conversation[index].steps.append(step) }

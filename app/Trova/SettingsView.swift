@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKeys.llmModel) private var llmModel = "anthropic/claude-sonnet-4.6"
     @AppStorage(SettingsKeys.reranking) private var reranking = false
     @AppStorage(SettingsKeys.verify) private var verify = false
+    @AppStorage(SettingsKeys.diversify) private var diversify = true
 
     @Environment(AppModel.self) private var model
 
@@ -58,6 +59,11 @@ struct SettingsView: View {
                 Toggle("Yanıt doğrulama (self-critique)", isOn: $verify)
                 Text("Yanıt sonrası ek bir LLM çağrısı: iddiaların kaynak maillerce desteklenip "
                    + "desteklenmediğini denetler ve desteklenmeyenleri işaretler (ek maliyet).")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("Sonuçları çeşitlendir", isOn: $diversify)
+                Text("Aynı konuşmanın çok sayıda benzer mesajının üst sıraları tıkamasını önler; "
+                   + "thread başına en çok \(Retrieval.perThread) sonuç gösterip farklı konuşmaları öne çıkarır.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 Divider()
