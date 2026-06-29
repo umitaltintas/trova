@@ -63,6 +63,31 @@ final class AppModel {
     var memoryCount = 0
     var accounts: [AccountStat] = []
 
+    // Sağlık / kurulum (HealthCheck girdileri)
+    var llmConfigured = false
+    var embedderConfigured = false
+    var usesLocalEmbedder = false
+    var statusLoaded = false        // ilk durum yüklemesi bitti mi (kurulum kapısı yanıp sönmesin)
+
+    /// Canlı kurulum durumundan teşhis raporu üretir (saf — yalnız depolanmış bayrakları okur).
+    var health: HealthReport {
+        HealthCheck.evaluate(HealthInput(
+            mailStoreReadable: hasAccess,
+            mailStoreLocated: mailRoot != nil,
+            indexedCount: totalCount,
+            vectorCount: vectorCount,
+            llmConfigured: llmConfigured,
+            embedderConfigured: embedderConfigured,
+            usesLocalEmbedder: usesLocalEmbedder))
+    }
+
+    /// İlk-çalıştırma kurulum kapısı gösterilmeli mi.
+    /// Erişim yoksa hemen; erişim varsa yalnız durum yüklendikten sonra (boş indeks) karar verilir.
+    var shouldShowSetup: Bool {
+        if !hasAccess { return true }
+        return statusLoaded && health.needsSetup
+    }
+
     // Arama
     var query = ""
     var mode: SearchMode = .hybrid
@@ -152,6 +177,23 @@ final class AppModel {
     func refreshAccess() {
         hasAccess = MailStore.canAccess()
         mailRoot = MailStore.locate()?.path
+        refreshProviders()
+    }
+
+    /// Sağlayıcı yapılandırma bayraklarını ağır nesne kurmadan (yalnız anahtar/ayar okuyarak) tazeler.
+    func refreshProviders() {
+        let defaults = UserDefaults.standard
+        let provider = defaults.string(forKey: SettingsKeys.embedProvider) ?? "local"
+        let embedKey = Keychain.get(KeychainKeys.embedKey)
+        let llmKey = Keychain.get(KeychainKeys.llmKey)
+
+        llmConfigured = !llmKey.isEmpty || OpenRouterClient.fromEnvironment() != nil
+        usesLocalEmbedder = provider == "local"
+        switch provider {
+        case "openai", "voyage": embedderConfigured = !embedKey.isEmpty
+        case "openrouter":       embedderConfigured = !(embedKey.isEmpty && llmKey.isEmpty)
+        default:                 embedderConfigured = true   // yerel her zaman kullanılabilir
+        }
     }
 
     func openFullDiskAccessSettings() {
@@ -168,7 +210,9 @@ final class AppModel {
                 return (try store.count(), try store.vectorCount(), try store.memoryCount(), accounts)
             }) else { return }
             totalCount = stats.0; vectorCount = stats.1; memoryCount = stats.2; accounts = stats.3
+            statusLoaded = true
         }
+        refreshProviders()
         loadTriage()   // indeksleme/durum yenilemesi sonrası triyaj listeleri de tazelensin
         loadConversations()
         loadMemories()

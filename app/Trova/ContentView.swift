@@ -12,7 +12,7 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 204, ideal: 224, max: 280)
         } content: {
             Group {
-                if !model.hasAccess { AccessGate() }
+                if model.shouldShowSetup { SetupView() }
                 else if model.section == .ask { AskColumn() }
                 else if model.section == .digest { DigestColumn() }
                 else { SearchColumn() }
@@ -82,6 +82,8 @@ private struct Sidebar: View {
             FilterBlock()
             Spacer()
 
+            HealthPill()
+
             Toggle(isOn: $autoSync) {
                 Label("Otomatik senkron", systemImage: "bolt.fill").font(.system(size: 12))
             }
@@ -91,6 +93,41 @@ private struct Sidebar: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+/// Kenar çubuğunda genel sağlık durumunu renkli noktayla gösterir; tıklayınca teşhis panelini açar.
+private struct HealthPill: View {
+    @Environment(AppModel.self) private var model
+    @State private var show = false
+
+    var body: some View {
+        Button { show = true } label: {
+            HStack(spacing: 7) {
+                Circle().fill(dotColor).frame(width: 8, height: 8)
+                Text("Sağlık").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
+                Spacer()
+                Image(systemName: "stethoscope").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .frame(maxWidth: .infinity)
+            .cardSurface()
+        }
+        .buttonStyle(.plain)
+        .help("Kurulum ve sağlık teşhisi")
+        .sheet(isPresented: $show) {
+            SetupView(asSheet: true)
+                .environment(model)
+                .frame(width: 540, height: 560)
+        }
+    }
+
+    private var dotColor: Color {
+        switch model.health.overall {
+        case .ok: .green
+        case .warn: .orange
+        case .fail: .red
+        }
     }
 }
 
@@ -862,24 +899,3 @@ private struct ThreadStrip: View {
 
 // MARK: - Erişim kapısı
 
-private struct AccessGate: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "lock.shield.fill").font(.system(size: 44)).foregroundStyle(Theme.accent)
-            Text("Full Disk Access gerekli").font(.rounded(18, .bold)).foregroundStyle(Theme.ink)
-            Text("Trova maillerinizi ~/Library/Mail'den okur. Apple Mail hesaplarınıza yeniden "
-               + "bağlanmaz; yalnızca yerel kopyayı okur. İzin tek seferliktir.")
-                .font(.system(size: 12)).foregroundStyle(Theme.muted)
-                .multilineTextAlignment(.center).frame(maxWidth: 360)
-            HStack {
-                Button("Sistem Ayarları'nı Aç") { model.openFullDiskAccessSettings() }
-                    .buttonStyle(.borderedProminent).tint(Theme.accent)
-                Button("Tekrar dene") { model.refreshAccess(); model.refreshStatus() }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.surface)
-    }
-}
