@@ -96,6 +96,7 @@ final class AppModel {
     var selectedBody: String?
     var selectedHTML: String?
     var selectedThread: [SearchHit] = []
+    var selectedMessageID: String?       // seçili mailin RFC822 Message-ID'si ("Mail'de Aç" için)
     var isSearching = false
 
     // Filtre
@@ -346,10 +347,12 @@ final class AppModel {
     }
 
     func loadSelected() {
-        guard let id = selection else { selectedBody = nil; selectedHTML = nil; selectedThread = []; return }
+        guard let id = selection else {
+            selectedBody = nil; selectedHTML = nil; selectedThread = []; selectedMessageID = nil; return
+        }
         let threadKey = selectedHit?.threadKey
         Task {
-            let loaded = await background { () -> (body: String, html: String?, thread: [SearchHit]) in
+            let loaded = await background { () -> (body: String, html: String?, thread: [SearchHit], messageID: String?) in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 let body = (try store.body(forID: id)) ?? ""
                 var html: String?
@@ -359,12 +362,23 @@ final class AppModel {
                     html = EMLXParser.sanitizeEmailHTML(raw)
                 }
                 let thread = try threadKey.map { try store.thread(forKey: $0) } ?? []
-                return (body, html, thread)
+                let messageID = try store.messageID(forID: id)
+                return (body, html, thread, messageID)
             }
             if let loaded {
-                selectedBody = loaded.body; selectedHTML = loaded.html; selectedThread = loaded.thread
+                selectedBody = loaded.body; selectedHTML = loaded.html
+                selectedThread = loaded.thread; selectedMessageID = loaded.messageID
             }
         }
+    }
+
+    /// Seçili maili native Apple Mail.app'te açar (message:// derin-linki). Message-ID yoksa hata gösterir.
+    func openInMail() {
+        guard let url = MailLink.appleMailURL(messageID: selectedMessageID) else {
+            errorMessage = "Bu mailin Message-ID'si kayıtlı değil; Mail'de açılamıyor."
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     func runAsk() {

@@ -818,6 +818,12 @@ private struct ReadingPane: View {
                         Chip(text: hit.mailbox, systemImage: "tray")
                         ForEach(hit.attachments, id: \.self) { Chip(text: $0, systemImage: "paperclip") }
                         Spacer()
+                        Button { model.openInMail() } label: {
+                            Label("Mail'de Aç", systemImage: "arrow.up.forward.app")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
+                        .disabled(MailLink.appleMailURL(messageID: model.selectedMessageID) == nil)
+                        .help("Bu maili Apple Mail.app'te aç (yanıtlamak/işlem yapmak için)")
                         if model.selectedHTML?.isEmpty == false {
                             Picker("", selection: $formatted) {
                                 Text("Biçimli").tag(true)

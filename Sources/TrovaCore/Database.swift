@@ -622,6 +622,13 @@ extension IndexStore {
         }
     }
 
+    /// Mailin RFC822 Message-ID'si ("Mail'de Aç" derin-linki için). Kayıtlı değilse nil.
+    public func messageID(forID id: String) throws -> String? {
+        try dbQueue.read { db in
+            try String.fetchOne(db, sql: "SELECT messageID FROM message WHERE id = ?", arguments: [id])
+        }
+    }
+
     /// Verilen id kümesi için görüntüleme meta verisini getirir.
     public func hits(forIDs ids: [String]) throws -> [String: SearchHit] {
         guard !ids.isEmpty else { return [:] }
