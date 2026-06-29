@@ -1,0 +1,439 @@
+import Foundation
+import AppKit
+import TrovaCore
+
+enum DateRange: String, CaseIterable, Identifiable {
+    case all, week, month, year
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .all: "Tüm zamanlar"
+        case .week: "Son 7 gün"
+        case .month: "Son 30 gün"
+        case .year: "Son 1 yıl"
+        }
+    }
+    var since: Date? {
+        switch self {
+        case .all: nil
+        case .week: Date().addingTimeInterval(-7 * 86_400)
+        case .month: Date().addingTimeInterval(-30 * 86_400)
+        case .year: Date().addingTimeInterval(-365 * 86_400)
+        }
+    }
+}
+
+enum AppError: Error, CustomStringConvertible {
+    case noMailStore, noEmbedder, noLLM
+    var description: String {
+        switch self {
+        case .noMailStore: return "Mail deposu bulunamadı (Full Disk Access verili mi?)."
+        case .noEmbedder: return "Embedding sağlayıcısı yok. Ayarlar'dan yapılandırın."
+        case .noLLM: return "OpenRouter anahtarı yok. Ayarlar'dan ekleyin."
+        }
+    }
+}
+
+@MainActor
+@Observable
+final class AppModel {
+    struct AccountStat: Identifiable, Sendable {
+        let id = UUID(); let account: String; let count: Int
+    }
+
+    /// Sohbetteki bir tur: soru + ajanın adımları, yanıtı ve kaynakları.
+    struct Exchange: Identifiable {
+        let id = UUID()
+        let question: String
+        var answer = ""
+        var steps: [AgentStep] = []
+        var cited: [SearchHit] = []
+        var verification: Verification?      // opsiyonel yanıt doğrulama sonucu
+        var running = true
+    }
+
+    enum Section: Equatable { case ask, search, digest }
+    var section: Section = .ask
+
+    // Durum
+    var hasAccess = false
+    var mailRoot: String?
+    var totalCount = 0
+    var vectorCount = 0
+    var memoryCount = 0
+    var accounts: [AccountStat] = []
+
+    // Arama
+    var query = ""
+    var mode: SearchMode = .hybrid
+    var results: [SearchHit] = []
+    var selection: SearchHit.ID?
+    var selectedBody: String?
+    var selectedHTML: String?
+    var selectedThread: [SearchHit] = []
+    var isSearching = false
+
+    // Filtre
+    var filterAccount = ""          // "" → tüm hesaplar (accountID)
+    var dateRange: DateRange = .all
+
+    // Ask (AI ajan — sohbet)
+    var question = ""
+    var conversation: [Exchange] = []
+    var isAsking = false
+    var currentConversationId: String?          // açık sohbetin kalıcı kimliği (yoksa yeni sohbet)
+    var conversations: [ConversationSummary] = []  // geçmiş sohbet tarayıcısı için
+    var memories: [Memory] = []                  // hafıza görüntüleyici listesi
+
+    // Bugün (proaktif asistan — triyaj + günlük brifing)
+    var needsReply: [SearchHit] = []     // yanıt gerekiyor: karşı taraf en son yazdı
+    var waitingOn: [SearchHit] = []      // yanıt bekliyor: sen en son yazdın, yanıt yok
+    var digestText = ""
+    var isDigesting = false
+
+    // Uzun işler
+    var busy = false
+    var progress = ""
+    var errorMessage: String?
+    var jobProcessed = 0
+    var jobTotal = 0
+    private var currentTask: Task<Void, Never>?
+    private var cancelFlag: CancellationFlag?
+    private var watcher: MailWatcher?
+
+    var selectedHit: SearchHit? {
+        results.first { $0.id == selection }
+            ?? selectedThread.first { $0.id == selection }
+            ?? needsReply.first { $0.id == selection }
+            ?? waitingOn.first { $0.id == selection }
+            ?? conversation.flatMap(\.cited).first { $0.id == selection }
+    }
+
+    /// Bir tarihin bugüne göre yaşını tam gün olarak verir (UI yaş çipleri için).
+    static func ageDays(_ date: Date?) -> Int { TriageItem.ageDays(of: date) }
+
+    func cancelJob() {
+        cancelFlag?.cancel()
+        currentTask?.cancel()
+        progress = "İptal ediliyor…"
+    }
+
+    // MARK: - Otomatik senkron (FSEvents)
+
+    func setAutoSync(_ enabled: Bool) {
+        enabled ? startWatching() : stopWatching()
+    }
+
+    private func startWatching() {
+        guard watcher == nil, hasAccess, let root = MailStore.locate() else { return }
+        let watcher = MailWatcher(root: root) { [weak self] in
+            Task { @MainActor in self?.onMailChanged() }
+        }
+        watcher.start()
+        self.watcher = watcher
+    }
+
+    private func stopWatching() {
+        watcher?.stop()
+        watcher = nil
+    }
+
+    private func onMailChanged() {
+        guard !busy else { return }
+        progress = "Yeni mail algılandı, güncelleniyor…"
+        runIndex()
+    }
+
+    func onAppear() {
+        refreshAccess()
+        refreshStatus()
+    }
+
+    func refreshAccess() {
+        hasAccess = MailStore.canAccess()
+        mailRoot = MailStore.locate()?.path
+    }
+
+    func openFullDiskAccessSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func refreshStatus() {
+        Task {
+            guard let stats = await background({ () -> (Int, Int, Int, [AccountStat]) in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                let accounts = try store.accountCounts().map { AccountStat(account: $0.account, count: $0.count) }
+                return (try store.count(), try store.vectorCount(), try store.memoryCount(), accounts)
+            }) else { return }
+            totalCount = stats.0; vectorCount = stats.1; memoryCount = stats.2; accounts = stats.3
+        }
+        loadTriage()   // indeksleme/durum yenilemesi sonrası triyaj listeleri de tazelensin
+        loadConversations()
+        loadMemories()
+    }
+
+    /// Geçmiş sohbetleri arka planda tazeler (geçmiş tarayıcısı için).
+    func loadConversations() {
+        Task {
+            guard let list = await background({
+                try IndexStore(path: AppPaths.databaseURL).allConversations()
+            }) else { return }
+            conversations = list
+        }
+    }
+
+    /// Ajanın kalıcı hafıza listesini arka planda tazeler (hafıza görüntüleyici için).
+    func loadMemories() {
+        Task {
+            guard let list = await background({
+                try IndexStore(path: AppPaths.databaseURL).allMemories()
+            }) else { return }
+            memories = list
+        }
+    }
+
+    /// Triyaj listelerini (yanıt gerekiyor / yanıt bekliyor) arka planda tazeler.
+    func loadTriage() {
+        Task {
+            guard let lists = await background({ () -> (needs: [SearchHit], waiting: [SearchHit]) in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                return (try store.needsReply(limit: 50),
+                        try store.waitingOnReply(minDays: 3, limit: 50))
+            }) else { return }
+            needsReply = lists.needs
+            waitingOn = lists.waiting
+        }
+    }
+
+    /// Son gelen mailler için LLM ile Türkçe günlük brifing üretir.
+    func runDigest() {
+        guard !isDigesting else { return }
+        guard let llm = Providers.llm() else { errorMessage = AppError.noLLM.description; return }
+        isDigesting = true; errorMessage = nil
+        Task {
+            defer { isDigesting = false }
+            let text = await background { () -> String in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                let hits = try store.recentReceived(sinceDays: 2, limit: 40)
+                return try DigestBuilder(llm: llm).build(hits)
+            }
+            if let text { digestText = text }
+        }
+    }
+
+    /// Ajanın kalıcı hafızasını temizler ve sayacı yeniler.
+    func clearMemory() {
+        Task {
+            _ = await background { try IndexStore(path: AppPaths.databaseURL).clearMemories() }
+            refreshStatus()
+        }
+    }
+
+    func runIndex() {
+        guard !busy else { return }
+        busy = true; errorMessage = nil; jobProcessed = 0; jobTotal = 0; progress = "Taranıyor…"
+        let flag = CancellationFlag(); cancelFlag = flag
+        currentTask = Task {
+            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus() }
+            let result = await background { () -> IndexResult in
+                guard let root = MailStore.locate() else { throw AppError.noMailStore }
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                return try Indexer.run(store: store, root: root, cancel: flag) { processed, total in
+                    Task { @MainActor in
+                        self.jobProcessed = processed; self.jobTotal = total
+                        self.progress = "İndeksleniyor \(processed)/\(total)"
+                    }
+                }
+            }
+            if let result {
+                progress = result.processed > 0
+                    ? "\(result.indexed) yeni · \(result.skipped) atlandı · \(result.failed) hata"
+                    : "Mail bulunamadı"
+            }
+        }
+    }
+
+    func runEmbed() {
+        guard !busy else { return }
+        busy = true; errorMessage = nil; jobProcessed = 0; jobTotal = 0; progress = "Hazırlanıyor…"
+        let flag = CancellationFlag(); cancelFlag = flag
+        currentTask = Task {
+            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus() }
+            guard let embedder = Providers.embedder() else {
+                errorMessage = AppError.noEmbedder.description; return
+            }
+            let count = await background { () -> Int in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                return try EmbeddingRunner.run(store: store, embedder: embedder, cancel: flag) { processed, total in
+                    Task { @MainActor in
+                        self.jobProcessed = processed; self.jobTotal = total
+                        self.progress = "Gömülüyor \(processed)/\(total)"
+                    }
+                }
+            }
+            if let count { progress = count == 0 ? "Tüm mailler zaten gömülü" : "Bitti · \(count) işlendi" }
+        }
+    }
+
+    func runSearch() {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        let selectedMode = mode
+        let filter = SearchFilter(
+            accountID: filterAccount.isEmpty ? nil : filterAccount, since: dateRange.since)
+        isSearching = true; errorMessage = nil
+        Task {
+            let hits = await background { () -> [SearchHit] in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                let embedder = selectedMode == .fts ? nil : Providers.embedder()
+                // Reranking yalnızca anlamsal/hibrit modlarda anlamlıdır.
+                let reranker = selectedMode == .fts ? nil : Providers.reranker()
+                return try Searcher(store: store, embedder: embedder, reranker: reranker)
+                    .search(q, mode: selectedMode, filter: filter, limit: 50)
+            }
+            isSearching = false
+            results = hits ?? []
+            selection = results.first?.id
+            loadSelected()
+        }
+    }
+
+    func loadSelected() {
+        guard let id = selection else { selectedBody = nil; selectedHTML = nil; selectedThread = []; return }
+        let threadKey = selectedHit?.threadKey
+        Task {
+            let loaded = await background { () -> (body: String, html: String?, thread: [SearchHit]) in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                let body = (try store.body(forID: id)) ?? ""
+                var html: String?
+                if let path = try store.filePath(forID: id),
+                   let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                   let raw = EMLXParser.extractHTMLBody(data: data) {
+                    html = EMLXParser.sanitizeEmailHTML(raw)
+                }
+                let thread = try threadKey.map { try store.thread(forKey: $0) } ?? []
+                return (body, html, thread)
+            }
+            if let loaded {
+                selectedBody = loaded.body; selectedHTML = loaded.html; selectedThread = loaded.thread
+            }
+        }
+    }
+
+    func runAsk() {
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, !isAsking else { return }
+        guard let llm = Providers.llm() else { errorMessage = AppError.noLLM.description; return }
+
+        // Önceki turlar bağlam olarak ajana verilir (sohbet hafızası).
+        let history = conversation.map { ChatTurn(question: $0.question, answer: $0.answer) }
+        // Yanıt doğrulama (self-critique) ayarı: açıksa ek bir LLM çağrısı yapılır.
+        let verify = UserDefaults.standard.bool(forKey: SettingsKeys.verify)
+        question = ""
+        // Yeni bir sohbet başlıyorsa kalıcı bir kimlik ata (sonraki turlar aynı kayda yazılır).
+        if currentConversationId == nil { currentConversationId = UUID().uuidString }
+        conversation.append(Exchange(question: q))
+        let index = conversation.count - 1
+
+        isAsking = true; errorMessage = nil
+        let flag = CancellationFlag(); cancelFlag = flag
+        currentTask = Task {
+            defer {
+                isAsking = false; currentTask = nil; cancelFlag = nil
+                if index < conversation.count { conversation[index].running = false }
+            }
+            let run = await background { () -> AgentRun in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                let agent = ToolAgent(store: store, embedder: Providers.embedder(),
+                                      llm: llm, reranker: Providers.reranker())
+                return try agent.run(q, history: history, cancel: flag, verify: verify) { step in
+                    Task { @MainActor in
+                        if index < self.conversation.count { self.conversation[index].steps.append(step) }
+                    }
+                }
+            }
+            if let run, index < conversation.count {
+                conversation[index].answer = run.answer
+                conversation[index].cited = run.cited
+                conversation[index].verification = run.verification
+                persistConversation()
+            }
+        }
+    }
+
+    /// Açık sohbeti (yanıtı dolu turlarıyla) kalıcı geçmişe kaydeder ve listeyi tazeler.
+    private func persistConversation() {
+        guard let cid = currentConversationId else { return }
+        let turns = conversation
+            .filter { !$0.answer.isEmpty }
+            .map { ChatTurn(question: $0.question, answer: $0.answer) }
+        guard !turns.isEmpty else { return }
+        let title = String(turns[0].question.prefix(60))
+        Task {
+            _ = await background {
+                try IndexStore(path: AppPaths.databaseURL)
+                    .saveConversation(id: cid, title: title, turns: turns)
+            }
+            loadConversations()
+        }
+    }
+
+    func newConversation() {
+        guard !isAsking else { return }
+        conversation = []
+        currentConversationId = nil
+    }
+
+    /// Geçmiş bir sohbeti yeniden açar: turlarını yükleyip sohbeti yeniden kurar ve Sor sekmesine geçer.
+    func loadConversation(_ id: String) {
+        guard !isAsking else { return }
+        Task {
+            guard let turns = await background({
+                try IndexStore(path: AppPaths.databaseURL).conversationTurns(id)
+            }) else { return }
+            conversation = turns.map {
+                Exchange(question: $0.question, answer: $0.answer,
+                         steps: [], cited: [], verification: nil, running: false)
+            }
+            currentConversationId = id
+            section = .ask
+        }
+    }
+
+    /// Geçmiş bir sohbeti siler; açık olan sohbetse ekranı da temizler.
+    func deleteConversation(_ id: String) {
+        Task {
+            _ = await background {
+                try IndexStore(path: AppPaths.databaseURL).deleteConversation(id)
+            }
+            if currentConversationId == id { newConversation() }
+            loadConversations()
+        }
+    }
+
+    /// Tek bir hafıza kaydını siler; listeyi ve sayacı tazeler.
+    func deleteMemory(_ id: String) {
+        Task {
+            _ = await background {
+                try IndexStore(path: AppPaths.databaseURL).deleteMemory(id)
+            }
+            loadMemories()
+            guard let count = await background({
+                try IndexStore(path: AppPaths.databaseURL).memoryCount()
+            }) else { return }
+            memoryCount = count
+        }
+    }
+
+    /// Bloklayıcı işi arka planda çalıştırır; hata olursa `errorMessage`'a yazıp nil döner.
+    private func background<T: Sendable>(_ work: @Sendable @escaping () throws -> T) async -> T? {
+        do {
+            return try await Task.detached(priority: .userInitiated, operation: work).value
+        } catch {
+            errorMessage = "\(error)"
+            return nil
+        }
+    }
+}

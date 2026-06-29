@@ -1,0 +1,14 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+build/
+*.xcodeproj
+*.xcworkspace
+
+# Yerel veritabanı ve gizli anahtarlar asla commit edilmez
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
+secrets.json

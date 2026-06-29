@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:email-indexer}",
+            "name": "Debug eidx",
+            "target": "eidx",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug eidx"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:email-indexer}",
+            "name": "Release eidx",
+            "target": "eidx",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release eidx"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:email-indexer}",
+            "name": "Debug trova",
+            "target": "trova",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug trova"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:email-indexer}",
+            "name": "Release trova",
+            "target": "trova",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release trova"
+        }
+    ]
+}

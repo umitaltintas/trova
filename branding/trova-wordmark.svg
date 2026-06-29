@@ -1,0 +1,55 @@
+<svg width="1240" height="360" viewBox="0 0 1240 360" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="300" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#252158" />
+      <stop offset="1" stop-color="#12102B" />
+    </linearGradient>
+    <radialGradient id="found" cx="0.42" cy="0.38" r="0.75">
+      <stop offset="0" stop-color="#FFE6A8" />
+      <stop offset="0.35" stop-color="#FFC24D" />
+      <stop offset="0.75" stop-color="#FF8A3D" />
+      <stop offset="1" stop-color="#F0563C" />
+    </radialGradient>
+    <radialGradient id="node" cx="0.4" cy="0.35" r="0.85">
+      <stop offset="0" stop-color="#AEB2EE" />
+      <stop offset="1" stop-color="#7C80D6" />
+    </radialGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FF9A4D" stop-opacity="0.55" />
+      <stop offset="1" stop-color="#FF7A45" stop-opacity="0" />
+    </radialGradient>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="6" />
+    </filter>
+  </defs>
+
+  <!-- Mini icon (squircle) -->
+  <g transform="translate(40,40)">
+    <rect x="0" y="0" width="280" height="280" rx="64" ry="64" fill="url(#bg)" />
+    <g transform="translate(140,128) scale(0.50) translate(-512,-470)">
+      <g stroke="#6E72C8" stroke-width="11" stroke-linecap="round" opacity="0.5" fill="none">
+        <line x1="512" y1="470" x2="326" y2="322" />
+        <line x1="512" y1="470" x2="704" y2="300" />
+        <line x1="512" y1="470" x2="742" y2="566" />
+        <line x1="512" y1="470" x2="372" y2="648" />
+        <line x1="326" y1="322" x2="262" y2="506" />
+        <line x1="372" y1="648" x2="566" y2="710" />
+        <line x1="566" y1="710" x2="742" y2="566" />
+      </g>
+      <circle cx="326" cy="322" r="30" fill="url(#node)" />
+      <circle cx="704" cy="300" r="34" fill="url(#node)" />
+      <circle cx="742" cy="566" r="27" fill="url(#node)" />
+      <circle cx="372" cy="648" r="31" fill="url(#node)" />
+      <circle cx="566" cy="710" r="25" fill="url(#node)" />
+      <circle cx="262" cy="506" r="23" fill="url(#node)" />
+      <circle cx="512" cy="470" r="150" fill="url(#halo)" filter="url(#soft)" />
+      <circle cx="512" cy="470" r="92" fill="url(#found)" />
+      <circle cx="486" cy="442" r="28" fill="#FFFFFF" opacity="0.5" filter="url(#soft)" />
+    </g>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="372" y="232"
+        font-family="SF Pro Rounded, -apple-system, Helvetica Neue, Arial, sans-serif"
+        font-size="200" font-weight="600" letter-spacing="-6" fill="#211D4A">trova</text>
+</svg>
