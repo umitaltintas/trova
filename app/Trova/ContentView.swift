@@ -497,7 +497,39 @@ private struct ExchangeView: View {
                     }
                 }
             }
+            if !exchange.answer.isEmpty && !exchange.running {
+                ExportBar(
+                    markdown: {
+                        MarkdownExporter.answer(question: exchange.question,
+                                                answer: exchange.answer, citations: exchange.cited)
+                    },
+                    filename: exchange.question)
+            }
         }
+    }
+}
+
+/// AI yanıtını (kaynaklarıyla) Markdown olarak panoya kopyalama / .md kaydetme çubuğu.
+private struct ExportBar: View {
+    let markdown: () -> String
+    let filename: String
+    @State private var copied = false
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Button {
+                Exporter.copy(markdown()); copied = true
+            } label: {
+                Label(copied ? "Kopyalandı" : "Markdown kopyala",
+                      systemImage: copied ? "checkmark" : "doc.on.doc")
+            }
+            Button { Exporter.save(markdown(), suggestedName: filename) } label: {
+                Label("Dışa aktar", systemImage: "square.and.arrow.down")
+            }
+            Spacer()
+        }
+        .font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(Theme.accent)
+        .padding(.top, 2)
     }
 }
 
@@ -818,6 +850,13 @@ private struct ReadingPane: View {
                         Chip(text: hit.mailbox, systemImage: "tray")
                         ForEach(hit.attachments, id: \.self) { Chip(text: $0, systemImage: "paperclip") }
                         Spacer()
+                        Button {
+                            Exporter.copy(MarkdownExporter.email(hit, body: model.selectedBody))
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .help("Maili Markdown olarak panoya kopyala")
                         Button { model.openInMail() } label: {
                             Label("Mail'de Aç", systemImage: "arrow.up.forward.app")
                         }

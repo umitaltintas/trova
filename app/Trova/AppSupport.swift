@@ -1,5 +1,37 @@
 import Foundation
+import AppKit
+import UniformTypeIdentifiers
 import TrovaCore
+
+/// Markdown çıktısını panoya kopyalar ya da .md dosyasına kaydeder.
+enum Exporter {
+    static func copy(_ markdown: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(markdown, forType: .string)
+    }
+
+    @MainActor
+    static func save(_ markdown: String, suggestedName: String) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = safeFilename(suggestedName)
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK, let url = panel.url {
+            try? markdown.data(using: .utf8)?.write(to: url)
+        }
+    }
+
+    /// Başlıktan güvenli bir dosya adı üretir (.md uzantılı).
+    static func safeFilename(_ base: String) -> String {
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = trimmed.isEmpty ? "trova-not" : trimmed
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: " -_"))
+        let mapped = source.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
+        let safe = String(mapped).prefix(50).trimmingCharacters(in: .whitespaces)
+        return "\(safe.isEmpty ? "trova-not" : safe).md"
+    }
+}
 
 enum AppPaths {
     /// CLI ile AYNI veritabanı — `trova` ve uygulama tek indeksi paylaşır.
