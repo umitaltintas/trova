@@ -690,6 +690,14 @@ public final class IndexStore: Sendable {
         }
     }
 
+    /// Ham bir (kayıtlı) arama sorgusunun şu an kaç maile uyduğunu sayar. `SearchPlanner` ile
+    /// operatör/Türkçe tarih ifadesini çözüp FTS metni + filtreye indirir, sonra `countMatching`
+    /// çağırır. "Akıllı klasör" canlı eşleşme sayacı için kullanılır (saf sayım — PRF/embedding yok).
+    public func countSavedSearch(_ rawQuery: String, now: Date, calendar: Calendar = .current) throws -> Int {
+        let plan = SearchPlanner.plan(rawQuery, now: now, calendar: calendar)
+        return try countMatching(query: plan.ftsQuery, filter: plan.filter)
+    }
+
     /// Filtreye uyan id kümesi (vektör aramasını kısıtlamak için).
     public func idsMatching(_ filter: SearchFilter) throws -> Set<String> {
         let (clause, filterArgs) = Self.filterSQL(filter)

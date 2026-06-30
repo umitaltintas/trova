@@ -571,6 +571,12 @@ private struct SavedSearchButton: View {
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     }
                                     .buttonStyle(.plain)
+                                    // Akıllı klasör: bu kayıtlı aramanın şu anki canlı eşleşme sayısı.
+                                    if let count = model.savedSearchCounts[saved.id],
+                                       let badge = BadgeCount.label(count) {
+                                        CountBadge(text: badge, active: false)
+                                            .help("\(count) eşleşen mail")
+                                    }
                                     Button { model.deleteSavedSearch(saved.id) } label: {
                                         Image(systemName: "trash").font(.system(size: 10)).foregroundStyle(Theme.muted)
                                     }

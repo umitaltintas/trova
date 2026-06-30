@@ -156,6 +156,8 @@ final class AppModel {
 
     // Kayıtlı aramalar
     var savedSearches: [SavedSearch] = []
+    // Her kayıtlı aramanın şu anki canlı eşleşme sayısı (akıllı klasör rozeti). id → sayı.
+    var savedSearchCounts: [String: Int] = [:]
 
     // Son aramalar (otomatik arama geçmişi — kullanıcı arama yaptıkça birikir)
     var recentSearches: [String] = []
@@ -617,13 +619,31 @@ final class AppModel {
         }
     }
 
-    /// Kayıtlı aramaları arka planda tazeler.
+    /// Kayıtlı aramaları arka planda tazeler; her birinin canlı eşleşme sayısını da yeniden hesaplar.
     func loadSavedSearches() {
         Task {
             guard let list = await background({
                 try IndexStore(path: AppPaths.databaseURL).allSavedSearches()
             }) else { return }
             savedSearches = list
+            refreshSavedSearchCounts(list)
+        }
+    }
+
+    /// Kayıtlı aramalar için "akıllı klasör" eşleşme sayılarını arka planda (ağ yok) hesaplar.
+    /// `countSavedSearch` yalnız FTS + filtre (operatör/Türkçe tarih çözülmüş) çalıştırır; ucuzdur.
+    private func refreshSavedSearchCounts(_ list: [SavedSearch]) {
+        let now = Date()
+        Task {
+            let counts = await background { () -> [String: Int] in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                var result: [String: Int] = [:]
+                for saved in list {
+                    result[saved.id] = (try? store.countSavedSearch(saved.query, now: now)) ?? 0
+                }
+                return result
+            }
+            savedSearchCounts = counts ?? [:]
         }
     }
 
