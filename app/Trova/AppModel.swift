@@ -123,6 +123,9 @@ final class AppModel {
     // Kayıtlı aramalar
     var savedSearches: [SavedSearch] = []
 
+    // Son aramalar (otomatik arama geçmişi — kullanıcı arama yaptıkça birikir)
+    var recentSearches: [String] = []
+
     // Ask (AI ajan — sohbet)
     var question = ""
     var conversation: [Exchange] = []
@@ -146,6 +149,11 @@ final class AppModel {
     private var currentTask: Task<Void, Never>?
     private var cancelFlag: CancellationFlag?
     private var watcher: MailWatcher?
+
+    init() {
+        // Otomatik arama geçmişini kalıcı depodan yükle.
+        recentSearches = RecentSearchesStore.load()
+    }
 
     var selectedHit: SearchHit? {
         results.first { $0.id == selection }
@@ -461,6 +469,9 @@ final class AppModel {
         searchFromLabel = ops.fromContains
         searchHasAttachment = ops.hasAttachment
         let q = parsed.hint != nil ? parsed.cleaned : ops.cleaned
+        // Geçerli bir arama metni varsa (yalnız operatör/tarih değil — browse fallback hariç)
+        // ham kullanıcı sorgusunu otomatik geçmişe ekle.
+        if !q.isEmpty { recordRecent(raw) }
         let selectedMode = mode
         // Algılanan tarih aralığı, kenar çubuğundaki tarih picker'ını geçersiz kılar.
         let since = parsed.hint?.since ?? dateRange.since
@@ -501,6 +512,26 @@ final class AppModel {
             selection = results.first?.id
             loadSelected()
         }
+    }
+
+    /// Ham kullanıcı sorgusunu otomatik arama geçmişine ekler ve kalıcılaştırır (en yeni başta).
+    private func recordRecent(_ raw: String) {
+        var recents = RecentSearches(items: recentSearches)
+        recents.add(raw)
+        recentSearches = recents.items
+        RecentSearchesStore.save(recentSearches)
+    }
+
+    /// Geçmişten bir sorguyu yeniden çalıştırır.
+    func runRecent(_ q: String) {
+        query = q
+        runSearch()
+    }
+
+    /// Otomatik arama geçmişini temizler ve kalıcılaştırır.
+    func clearRecents() {
+        recentSearches = []
+        RecentSearchesStore.save([])
     }
 
     func loadSelected() {

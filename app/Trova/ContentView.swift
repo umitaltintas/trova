@@ -334,6 +334,11 @@ private struct SearchColumn: View {
                 .padding(.horizontal, 14).padding(.top, 8)
             }
 
+            // Arama kutusu boşken biriken otomatik arama geçmişini göster.
+            if model.query.trimmingCharacters(in: .whitespaces).isEmpty && !model.recentSearches.isEmpty {
+                RecentSearchesBar()
+            }
+
             Color.clear.frame(height: 12)
 
             Divider().overlay(Theme.line)
@@ -357,6 +362,39 @@ private struct SearchColumn: View {
             }
         }
         .background(Theme.surface)
+    }
+}
+
+/// Arama kutusu boşken son yapılan aramaları tıklanabilir çipler olarak gösterir.
+/// Bir çipe tıklayınca o sorgu yeniden çalıştırılır; "Temizle" tüm geçmişi siler.
+private struct RecentSearchesBar: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("SON ARAMALAR").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.faint).tracking(0.6)
+                Spacer()
+                Button("Temizle") { model.clearRecents() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+                    .help("Son aramaları temizle")
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(model.recentSearches, id: \.self) { q in
+                        Button { model.runRecent(q) } label: {
+                            Chip(text: q, systemImage: "clock.arrow.circlepath")
+                        }
+                        .buttonStyle(.plain)
+                        .help(q)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.top, 10)
     }
 }
 

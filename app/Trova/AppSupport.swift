@@ -50,6 +50,23 @@ enum SettingsKeys {
     static let verify = "verify"                  // Yanıt doğrulama / self-critique (varsayılan kapalı)
     static let diversify = "diversify"            // Sonuçları thread bazında çeşitlendir (varsayılan açık)
     static let queryExpansion = "queryExpansion"  // PRF sorgu genişletme (varsayılan kapalı)
+    static let recentSearches = "trova.recentSearches"  // otomatik arama geçmişi ([String], en yeni başta)
+}
+
+/// Otomatik arama geçmişini UserDefaults'a okuyup yazan küçük yardımcı.
+/// Çekirdek `RecentSearches` ile normalize ederek tutarlılığı garantiler.
+enum RecentSearchesStore {
+    /// Saklanan son sorguları (en yeni başta, normalize edilmiş) döndürür.
+    static func load() -> [String] {
+        let raw = UserDefaults.standard.stringArray(forKey: SettingsKeys.recentSearches) ?? []
+        return RecentSearches(items: raw).items
+    }
+
+    /// Verilen listeyi normalize edip UserDefaults'a yazar.
+    static func save(_ items: [String]) {
+        let normalized = RecentSearches(items: items).items
+        UserDefaults.standard.set(normalized, forKey: SettingsKeys.recentSearches)
+    }
 }
 
 /// Çeşitlendirme ayarından thread başına izin verilen sonuç sayısını verir.
