@@ -1603,6 +1603,37 @@ extension IndexStore {
         }
     }
 
+    /// Birden çok maili TEK transaction'da yıldızlar (toplu pin) — Apple Mail'e YAZMAZ.
+    /// Her id `pin(id:)` ile aynı kuralları izler: kararlı `message.id` anahtarı; idempotent
+    /// upsert (zaten yıldızlıysa yalnız `pinnedAt` güncellenir, satır çoğalmaz); boş/yalnız
+    /// boşluk id'ler atlanır. Boş liste güvenlidir (hiç yazma yapılmaz). Tek tek `pin` döngüsü
+    /// yerine tek yazma → toplu seçimde tutarlı ve ucuz.
+    public func pinMany(ids: [String], at date: Date = Date()) throws {
+        let keys = ids.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !keys.isEmpty else { return }
+        let stamp = ISO8601DateFormatter().string(from: date)
+        try dbQueue.write { db in
+            for key in keys {
+                try db.execute(sql: """
+                    INSERT INTO pinned (messageID, pinnedAt) VALUES (?, ?)
+                    ON CONFLICT(messageID) DO UPDATE SET pinnedAt = excluded.pinnedAt
+                    """, arguments: [key, stamp])
+            }
+        }
+    }
+
+    /// Birden çok mailin yıldızını TEK transaction'da kaldırır (toplu unpin). Yıldızlı olmayan
+    /// id'ler etkisizdir (idempotent); boş/yalnız boşluk id'ler atlanır; boş liste güvenlidir.
+    public func unpinMany(ids: [String]) throws {
+        let keys = ids.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !keys.isEmpty else { return }
+        try dbQueue.write { db in
+            for key in keys {
+                try db.execute(sql: "DELETE FROM pinned WHERE messageID = ?", arguments: [key])
+            }
+        }
+    }
+
     /// Bir mailin Trova-yerel yıldızlı olup olmadığını döndürür.
     public func isPinned(id: String) throws -> Bool {
         try dbQueue.read { db in

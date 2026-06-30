@@ -160,6 +160,10 @@ final class AppModel {
     // Sonuç satırı yıldız rozeti + ReadingPane "Yıldızla/Yıldızı kaldır" toggle'ı bunu izler.
     var pinnedIDs: Set<String> = []
 
+    // Arama sonuçlarında çoklu seçim (toplu aksiyon): seçili mail id'leri (message.id).
+    // Sonuç satırı onay kutusu + toplu aksiyon çubuğu bunu izler; yeni aramada sıfırlanır.
+    var selectedResultIDs: Set<String> = []
+
     // Kayıtlı aramalar
     var savedSearches: [SavedSearch] = []
     // Her kayıtlı aramanın şu anki canlı eşleşme sayısı (akıllı klasör rozeti). id → sayı.
@@ -820,6 +824,64 @@ final class AppModel {
         }
     }
 
+    // MARK: - Arama sonuçlarında çoklu seçim + toplu aksiyon
+
+    /// Bir sonuç satırının seçim durumunu açar/kapatır (kümede varsa çıkarır, yoksa ekler).
+    func toggleResultSelection(id: String) {
+        if selectedResultIDs.contains(id) { selectedResultIDs.remove(id) }
+        else { selectedResultIDs.insert(id) }
+    }
+
+    /// Çoklu seçimi tümüyle temizler (toplu aksiyon çubuğu gizlenir).
+    func clearResultSelection() {
+        selectedResultIDs.removeAll()
+    }
+
+    /// Gösterilen tüm sonuçları seçer (sırayla; filtreli liste neyse onu kapsar).
+    func selectAllResults() {
+        selectedResultIDs = Set(displayedResults.map(\.id))
+    }
+
+    /// Seçili mailleri TOPLU yıldızlar (tek transaction). Optimistik: yerel kümeyi hemen
+    /// günceller, sonra kalıcılaştırır. "Yalnız yıldızlı" süzgeci açıkken listeyi tazeler.
+    func pinSelected() {
+        let ids = Array(selectedResultIDs)
+        guard !ids.isEmpty else { return }
+        pinnedIDs.formUnion(ids)
+        Task {
+            _ = await background {
+                try IndexStore(path: AppPaths.databaseURL).pinMany(ids: ids, at: Date())
+            }
+            if pinnedOnly && section == .search { runSearch() }
+        }
+    }
+
+    /// Seçili maillerin yıldızını TOPLU kaldırır (tek transaction). Optimistik + kalıcı.
+    /// "Yalnız yıldızlı" süzgeci açıkken yıldızı kalkan mailler listeden düşsün diye tazeler.
+    func unpinSelected() {
+        let ids = Array(selectedResultIDs)
+        guard !ids.isEmpty else { return }
+        pinnedIDs.subtract(ids)
+        Task {
+            _ = await background {
+                try IndexStore(path: AppPaths.databaseURL).unpinMany(ids: ids)
+            }
+            if pinnedOnly && section == .search { runSearch() }
+        }
+    }
+
+    /// Seçili sonuçları Markdown listesine döker (gösterilen sırayı korur).
+    func exportSelectedMarkdown() -> String {
+        let hits = displayedResults.filter { selectedResultIDs.contains($0.id) }
+        return MarkdownExporter.emailList(title: "Seçili sonuçlar", items: listItems(hits))
+    }
+
+    /// Seçili sonuçları CSV'ye döker (gösterilen sırayı korur).
+    func exportSelectedCSV() -> String {
+        let hits = displayedResults.filter { selectedResultIDs.contains($0.id) }
+        return CsvExporter.emailList(listItems(hits))
+    }
+
     /// Tüm görmezden gelme kayıtlarını siler ve triyaj listelerini yeniden yükler ("Gizlenenleri geri al").
     func restoreDismissedDigest() {
         Task {
@@ -973,6 +1035,8 @@ final class AppModel {
         let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
         // Yeni arama: eski gönderen daraltması yeni sonuçlara yapışmasın diye sıfırla.
         activeSenderFilter = nil
+        // Yeni arama: önceki çoklu seçim yeni sonuçlarla tutarsız kalmasın diye temizle.
+        selectedResultIDs.removeAll()
         // Arama metni yoksa bile aktif bir filtre çipi (okunmadı/bayraklı/yıldızlı) varsa browse'a izin ver.
         guard !raw.isEmpty || unreadOnly || flaggedOnly || pinnedOnly else {
             results = []; selection = nil; highlightTerms = []; return

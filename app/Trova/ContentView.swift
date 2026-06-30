@@ -453,6 +453,10 @@ private struct SearchColumn: View {
                 if model.senderFacets.count > 1 {
                     SenderFacetBar()
                 }
+                // Toplu aksiyon çubuğu: en az bir sonuç seçiliyken listenin üstünde belirir.
+                if !model.selectedResultIDs.isEmpty {
+                    BulkActionBar()
+                }
                 List(selection: $model.selection) {
                     ForEach(model.displayedResults) { hit in
                         ResultRow(hit: hit, terms: model.highlightTerms)
@@ -494,6 +498,57 @@ private struct SenderFacetBar: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14).padding(.bottom, 8)
+    }
+}
+
+/// Çoklu seçim toplu aksiyon çubuğu: arama sonuç listesinin üstünde, en az bir satır seçiliyken
+/// belirir. "N seçili" + toplu Yıldızla / Yıldızı kaldır + Dışa aktar (Markdown/CSV) + Tümünü seç +
+/// Temizle. Dar panoda taşmasın diye düğmeler FlowLayout ile alt satıra sarar. Yalnız arama
+/// sütununda kullanılır (diğer bölümleri etkilemez). Yıldız Trova-yerel — Apple Mail'e yazmaz.
+private struct BulkActionBar: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        FlowLayout(spacing: 8, lineSpacing: 8) {
+            Text("\(model.selectedResultIDs.count) seçili")
+                .font(.rounded(12, .semibold)).foregroundStyle(Theme.accent)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(Theme.accentSoft, in: Capsule())
+
+            Button { model.pinSelected() } label: {
+                Label("Yıldızla", systemImage: "star.fill")
+            }
+            .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
+            .help("Seçili mailleri Trova içinde yıldızla (Apple Mail'e yazmaz)")
+
+            Button { model.unpinSelected() } label: {
+                Label("Yıldızı kaldır", systemImage: "star.slash")
+            }
+            .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
+            .help("Seçili maillerin Trova-yerel yıldızını kaldır")
+
+            ListExportMenu(markdown: { model.exportSelectedMarkdown() },
+                           csv: { model.exportSelectedCSV() },
+                           filename: "Seçili sonuçlar",
+                           labelText: "Dışa aktar")
+
+            Button { model.selectAllResults() } label: {
+                Label("Tümünü seç", systemImage: "checkmark.circle")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.plain).foregroundStyle(Theme.accent)
+            .help("Gösterilen tüm sonuçları seç")
+
+            Button { model.clearResultSelection() } label: {
+                Label("Temizle", systemImage: "xmark.circle")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.plain).foregroundStyle(Theme.muted)
+            .help("Seçimi temizle")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(Theme.accentSoft.opacity(0.5))
     }
 }
 
@@ -617,8 +672,23 @@ private struct ResultRow: View {
         AttachmentMatch.matching(names: hit.attachments, terms: terms)
     }
 
+    /// Bu satır toplu aksiyon için seçili mi (çoklu seçim — okuma panelindeki "açık" seçimden ayrı).
+    private var isSelected: Bool { model.selectedResultIDs.contains(hit.id) }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
+            // Çoklu seçim onay kutusu (birincil seçim yolu): kendi tıklamasını yutar → satırı
+            // AÇMAZ, yalnız seçimi değiştirir. Maili açmak için satırın geri kalanına tıklanır.
+            Button { model.toggleResultSelection(id: hit.id) } label: {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16))
+                    .foregroundStyle(isSelected ? Theme.accent : Theme.faint)
+                    .frame(width: 22, height: 32)   // avatar yüksekliğiyle dikey hizala
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isSelected ? "Seçimi kaldır" : "Toplu aksiyon için seç")
+            .accessibilityLabel(isSelected ? "Seçili" : "Seç")
             Avatar(name: hit.fromName, email: hit.fromAddress, size: 32)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -658,7 +728,12 @@ private struct ResultRow: View {
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 4).padding(.horizontal, 4)
+        // Çoklu seçimde satırı hafifçe vurgula (okuma panelindeki "açık" seçimden ayrı görsel ipucu).
+        .background(isSelected ? Theme.accentSoft : Color.clear,
+                    in: RoundedRectangle(cornerRadius: Theme.radiusSmall))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall)
+            .stroke(isSelected ? Theme.accent.opacity(0.4) : Color.clear, lineWidth: 1))
         .contextMenu {
             if let address = hit.fromAddress, !address.isEmpty {
                 Button { model.composeNew(to: address) } label: {

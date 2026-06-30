@@ -92,6 +92,38 @@ final class PinnedTests: XCTestCase {
         XCTAssertEqual(hits.map(\.id), ["2"])
     }
 
+    /// Toplu pin/unpin round-trip: çok sayıda id tek transaction'da yıldızlanır/kaldırılır.
+    func testPinManyUnpinManyRoundTrip() throws {
+        let store = try makeStore()
+        try store.pinMany(ids: ["a", "b", "c"])
+        XCTAssertEqual(try store.pinnedIDs(), ["a", "b", "c"])
+        XCTAssertEqual(try store.pinnedCount(), 3)
+
+        try store.unpinMany(ids: ["a", "c"])
+        XCTAssertEqual(try store.pinnedIDs(), ["b"])
+        XCTAssertEqual(try store.pinnedCount(), 1)
+    }
+
+    /// Toplu pin idempotent: zaten yıldızlı id'leri yeniden pinlemek satır çoğaltmaz.
+    func testPinManyIsIdempotent() throws {
+        let store = try makeStore()
+        try store.pin(id: "a")
+        try store.pinMany(ids: ["a", "a", "b"])   // "a" tekrar + parti içi kopya
+        XCTAssertEqual(try store.pinnedCount(), 2)
+        XCTAssertEqual(try store.pinnedIDs(), ["a", "b"])
+    }
+
+    /// Boş liste güvenlidir; boş/yalnız boşluk id'ler atlanır (kayıt oluşmaz).
+    func testPinManyEmptyAndBlankSafe() throws {
+        let store = try makeStore()
+        try store.pinMany(ids: [])             // boş liste → no-op
+        try store.pinMany(ids: ["   ", ""])    // yalnız boşluk → atlanır
+        XCTAssertEqual(try store.pinnedCount(), 0)
+        try store.unpinMany(ids: [])           // boş unpin → güvenli
+        try store.unpinMany(ids: ["yok"])      // yıldızlı olmayan → etkisiz
+        XCTAssertEqual(try store.pinnedCount(), 0)
+    }
+
     /// Migration v14 additive: yeni tablo eklense de mevcut `message` verisi korunur.
     func testMigrationAdditivePreservesMessages() throws {
         let store = try makeStore()
