@@ -1041,6 +1041,35 @@ final class AppModel {
         runSearch()
     }
 
+    /// Aramada en az bir UI filtresi varsayılan-dışı mı (kullanıcının yazdığı ham sorgu metnindeki
+    /// operatör/tarih HARİÇ — onlar sorgunun parçası). Yalnız UI ile set edilen filtreler sayılır:
+    /// okunmadı/bayraklı/yıldızlı toggle'ları, hızlı tarih çipi, hesap/tarih picker'ları, gönderen
+    /// facet daraltması ve alaka-dışı bir gösterim sıralaması. "Filtreleri temizle" düğmesi buna bağlı.
+    var hasActiveSearchFilters: Bool {
+        unreadOnly || flaggedOnly || pinnedOnly
+            || activeQuickDate != nil
+            || !filterAccount.isEmpty
+            || dateRange != .all
+            || activeSenderFilter != nil
+            || resultSort != .relevance
+    }
+
+    /// Tüm aktif arama filtrelerini/sıralamayı/gönderen facet'ini varsayılana döndürür. Kullanıcının
+    /// yazdığı sorgu METNİNE DOKUNMAZ. Ardından: sorgu varsa aramayı yeniden çalıştırır; sorgu yoksa
+    /// (yalnız filtre çipiyle gözatılıyorduysa) `runSearch` filtresiz kalınca sonuç listesini boşaltır
+    /// — yani gözatma durumunu tazeler.
+    func clearSearchFilters() {
+        unreadOnly = false
+        flaggedOnly = false
+        pinnedOnly = false
+        activeQuickDate = nil
+        filterAccount = ""
+        dateRange = .all
+        activeSenderFilter = nil
+        resultSort = .relevance
+        runSearch()
+    }
+
     func runSearch() {
         let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
         // Yeni arama: eski gönderen daraltması yeni sonuçlara yapışmasın diye sıfırla.

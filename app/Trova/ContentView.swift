@@ -398,6 +398,21 @@ private struct SearchColumn: View {
                         model.toggleQuickDate(kind)
                     }
                 }
+                // En az bir filtre aktifken: tüm filtreleri/sıralamayı/gönderen daraltmasını tek tıkla
+                // sıfırlayan sade (muted) çip. Sorgu metnine dokunmaz; mevcut çiplerle aynı boyutta.
+                if model.hasActiveSearchFilters {
+                    Button(action: model.clearSearchFilters) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark.circle").font(.system(size: 9))
+                            Text("Filtreleri temizle").font(.system(size: 11)).lineLimit(1)
+                        }
+                        .foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Theme.line, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Tüm arama filtrelerini, sıralamayı ve gönderen daraltmasını sıfırlar (sorgu metni korunur)")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14).padding(.top, 8)
