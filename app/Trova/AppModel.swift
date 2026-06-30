@@ -104,6 +104,8 @@ final class AppModel {
     var selectedMessageID: String?       // seçili mailin RFC822 Message-ID'si ("Mail'de Aç" için)
     var isSearching = false
     var detectedDateLabel: String?       // sorgudan algılanan Türkçe tarih ifadesi etiketi (örn. "son 7 gün")
+    var searchFromLabel: String?         // from:/gönderen: operatörü etiketi
+    var searchHasAttachment = false      // has:attachment operatörü etkin mi
 
     // Filtre
     var filterAccount = ""          // "" → tüm hesaplar (accountID)
@@ -356,23 +358,27 @@ final class AppModel {
     func runSearch() {
         let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return }
-        // Sorgudaki Türkçe tarih ifadesini ("son 7 gün", "dün", "geçen ay") ayrıştır.
-        let parsed = TurkishDateParser.parse(raw, now: Date())
+        // Önce Gmail-tarzı operatörleri (from:/has:attachment), sonra Türkçe tarih ifadesini ayrıştır.
+        let ops = SearchOperatorParser.parse(raw)
+        let parsed = TurkishDateParser.parse(ops.cleaned, now: Date())
         detectedDateLabel = parsed.hint?.label
-        let q = parsed.hint != nil ? parsed.cleaned : raw
+        searchFromLabel = ops.fromContains
+        searchHasAttachment = ops.hasAttachment
+        let q = parsed.hint != nil ? parsed.cleaned : ops.cleaned
         let selectedMode = mode
         // Algılanan tarih aralığı, kenar çubuğundaki tarih picker'ını geçersiz kılar.
         let since = parsed.hint?.since ?? dateRange.since
         let until = parsed.hint?.until
         let filter = SearchFilter(
-            accountID: filterAccount.isEmpty ? nil : filterAccount, since: since, until: until)
+            accountID: filterAccount.isEmpty ? nil : filterAccount, since: since, until: until,
+            fromContains: ops.fromContains, hasAttachment: ops.hasAttachment)
         isSearching = true; errorMessage = nil
         Task {
             let hits = await background { () -> [SearchHit] in
                 let store = try IndexStore(path: AppPaths.databaseURL)
-                // Yalnızca tarih yazıldıysa (arama terimi kalmadıysa) aralıktaki mailleri listele.
+                // Arama metni kalmadıysa (yalnız operatör/tarih) filtreye uyanları listele.
                 if q.isEmpty {
-                    return try store.recentInRange(since: since, until: until, limit: 50)
+                    return try store.browse(filter, limit: 50)
                 }
                 let embedder = selectedMode == .fts ? nil : Providers.embedder()
                 // Reranking yalnızca anlamsal/hibrit modlarda anlamlıdır.

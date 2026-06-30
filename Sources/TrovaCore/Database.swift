@@ -84,10 +84,16 @@ public struct SearchFilter: Sendable, Equatable {
     public var accountID: String?
     public var since: Date?
     public var until: Date?
-    public init(accountID: String? = nil, since: Date? = nil, until: Date? = nil) {
+    public var fromContains: String?      // gönderen adı/e-postasında geçen metin (from: operatörü)
+    public var hasAttachment: Bool        // yalnızca ekli mailler (has:attachment operatörü)
+    public init(accountID: String? = nil, since: Date? = nil, until: Date? = nil,
+                fromContains: String? = nil, hasAttachment: Bool = false) {
         self.accountID = accountID; self.since = since; self.until = until
+        self.fromContains = fromContains; self.hasAttachment = hasAttachment
     }
-    public var isEmpty: Bool { accountID == nil && since == nil && until == nil }
+    public var isEmpty: Bool {
+        accountID == nil && since == nil && until == nil && fromContains == nil && !hasAttachment
+    }
 }
 
 /// Artımlı indeksleme için kaydın mevcut durumu.
@@ -457,6 +463,21 @@ public final class IndexStore: Sendable {
         }
     }
 
+    /// Filtreye uyan maileri (en yeni önce) listeler — arama metni olmadan yalnızca operatör/tarih
+    /// filtresi verildiğinde (örn. "from:ali", "has:attachment", "son 7 gün") gezinme için.
+    public func browse(_ filter: SearchFilter, limit: Int) throws -> [SearchHit] {
+        let (clause, filterArgs) = Self.filterSQL(filter)
+        var args = filterArgs
+        args.append(limit)
+        return try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT m.id, m.subject, m.fromName, m.fromAddress, m.mailbox, m.date, m.threadKey,
+                       m.attachments, m.snippet AS snip, 0.0 AS score
+                FROM message m WHERE 1=1\(clause) ORDER BY m.date DESC LIMIT ?
+                """, arguments: StatementArguments(args)).map(Self.hit(from:))
+        }
+    }
+
     // MARK: - Ajan kalıcı hafızası (Faz 6)
 
     /// Ajanın oturumlar arası hatırlayacağı kalıcı bir bilgiyi kaydeder.
@@ -572,6 +593,13 @@ public final class IndexStore: Sendable {
         if let account = filter.accountID { parts.append("m.accountID = ?"); args.append(account) }
         if let since = filter.since { parts.append("m.date >= ?"); args.append(since) }
         if let until = filter.until { parts.append("m.date <= ?"); args.append(until) }
+        if let from = filter.fromContains, !from.isEmpty {
+            parts.append("(m.fromName LIKE ? OR m.fromAddress LIKE ?)")
+            args.append("%\(from)%"); args.append("%\(from)%")
+        }
+        if filter.hasAttachment {
+            parts.append("(m.attachments IS NOT NULL AND m.attachments <> '')")
+        }
         return (parts.isEmpty ? "" : " AND " + parts.joined(separator: " AND "), args)
     }
 

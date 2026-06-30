@@ -287,10 +287,11 @@ private struct SearchColumn: View {
             }
             .padding(10).cardSurface().padding(.horizontal, 12).padding(.top, 12)
 
-            if let label = model.detectedDateLabel {
+            if model.detectedDateLabel != nil || model.searchFromLabel != nil || model.searchHasAttachment {
                 HStack(spacing: 6) {
-                    Chip(text: label, systemImage: "calendar")
-                    Text("tarih filtresi uygulandı").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                    if let label = model.detectedDateLabel { Chip(text: label, systemImage: "calendar") }
+                    if let from = model.searchFromLabel { Chip(text: from, systemImage: "person") }
+                    if model.searchHasAttachment { Chip(text: "ekli", systemImage: "paperclip") }
                     Spacer()
                 }
                 .padding(.horizontal, 14).padding(.top, 8)
@@ -304,7 +305,8 @@ private struct SearchColumn: View {
                 VStack { Spacer(); ProgressView().tint(Theme.accent); Spacer() }
             } else if model.results.isEmpty {
                 EmptyState(icon: "magnifyingglass", title: "Mailde ara",
-                           subtitle: "Anahtar kelime ya da anlamsal bir sorgu yaz; ek dosya adları da aranır.")
+                           subtitle: "Anahtar kelime ya da anlamsal sorgu. İpuçları: \"son 7 gün fatura\", "
+                                   + "\"from:ali\", \"has:attachment\" gibi tarih ve operatörler de kullanabilirsin.")
             } else {
                 List(selection: $model.selection) {
                     ForEach(model.results) { hit in
