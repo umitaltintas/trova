@@ -175,6 +175,11 @@ final class AppModel {
     var digestText = ""
     var isDigesting = false
 
+    /// Kenar çubuğu "Bugün" rozeti için yanıt-bekleyen sayısı: gizlenenler süzülmüş `needsReply`.
+    /// (waitingOn dahil DEĞİL — "yanıt bekleyen" = senin yanıtlaman gereken mailler.) Triyaj henüz
+    /// yüklenmediyse `needsReply` boş olduğundan 0; `loadTriage`/dismiss/restore ile kendiliğinden tazelenir.
+    var pendingReplyCount: Int { needsReply.count }
+
     // Yeni mail göstergesi (FSEvents canlı tazeleme): autoSync açıkken artımlı reindex bitince
     // eklenen mail sayısı burada birikir; kullanıcı rozete dokununca (clearNewMail) sıfırlanır.
     var newMailCount = 0

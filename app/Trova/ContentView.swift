@@ -114,7 +114,8 @@ private struct Sidebar: View {
                 ModeButton(title: "Ara", subtitle: "Kelime / anlamsal",
                            icon: "magnifyingglass", active: model.section == .search) { model.section = .search }
                 ModeButton(title: "Bugün", subtitle: "Brifing + yanıt bekleyenler",
-                           icon: "sun.max", active: model.section == .digest) { model.section = .digest }
+                           icon: "sun.max", active: model.section == .digest,
+                           badge: BadgeCount.label(model.pendingReplyCount)) { model.section = .digest }
                 ModeButton(title: "Kişiler", subtitle: "En çok yazışılanlar",
                            icon: "person.2", active: model.section == .people) {
                     model.section = .people; model.selectedPersonAddress = nil
@@ -183,6 +184,7 @@ private struct ModeButton: View {
     let subtitle: String
     let icon: String
     let active: Bool
+    var badge: String? = nil          // sağa hizalı küçük sayı rozeti (nil → rozet yok)
     let action: () -> Void
 
     var body: some View {
@@ -198,12 +200,30 @@ private struct ModeButton: View {
                         .foregroundStyle(active ? Color.white.opacity(0.85) : Theme.muted)
                 }
                 Spacer()
+                if let badge { CountBadge(text: badge, active: active) }
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
             .background(active ? Theme.accent : Color.clear,
                         in: RoundedRectangle(cornerRadius: Theme.radiusSmall))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Nav satırı sonundaki küçük sayı rozeti (örn. "Bugün" için yanıt-bekleyen sayısı).
+/// Pasif satırda Theme.accent dolgulu beyaz metin; aktif (mavi) satırda kontrast için beyaz
+/// dolgu + accent metin kullanılır. Genişlik içeriğe göre; "99+" gibi etiketlerde de bozulmaz.
+private struct CountBadge: View {
+    let text: String
+    let active: Bool
+
+    var body: some View {
+        Text(text)
+            .font(.rounded(11, .bold))
+            .foregroundStyle(active ? Theme.accent : .white)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .frame(minWidth: 18)
+            .background(active ? Color.white : Theme.accent, in: Capsule())
     }
 }
 
