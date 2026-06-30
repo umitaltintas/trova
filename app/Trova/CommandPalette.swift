@@ -27,6 +27,9 @@ enum PaletteCommands {
         .init(id: "insights", title: "Genel Bakış", subtitle: "İstatistik + aylık hacim", icon: "chart.bar") {
             $0.section = .insights
         },
+        .init(id: "attachments", title: "Ekler", subtitle: "Ekleri ada/türe göre ara + aç", icon: "paperclip") {
+            $0.section = .attachments
+        },
         .init(id: "new", title: "Yeni sohbet", subtitle: "Sor geçmişini temizle", icon: "square.and.pencil") {
             $0.section = .ask; $0.newConversation()
         },

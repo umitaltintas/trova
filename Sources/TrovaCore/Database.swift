@@ -155,6 +155,30 @@ public struct ConversationSummary: Sendable, Identifiable {
     }
 }
 
+/// Aranabilir tek bir e-posta eki satırı ("Ekler" görünümü için) — sahip mesajla birleştirilmiş.
+public struct AttachmentRow: Sendable, Identifiable, Equatable {
+    public let id: Int64           // `attachment` tablosunun satır kimliği (liste için kararlı kimlik)
+    public let fileName: String    // ek dosya adı
+    public let ext: String         // küçük harf uzantı (filtre/ikon)
+    public let messageID: String   // sahip mesajın kararlı id'si (message.id) — RFC822 Message-ID DEĞİL
+    public let subject: String?    // sahip mesajın konusu
+    public let fromName: String?   // sahip mesajın gönderen adı
+    public let fromAddress: String?// sahip mesajın gönderen e-postası
+    public let date: Date?         // sahip mesajın tarihi (göreli zaman gösterimi için)
+    public let filePath: String    // sahip `.emlx` yolu (eki çıkarıp açmak için)
+
+    /// Ad/uzantıdan türetilen kategori (çip ikonu).
+    public var kind: AttachmentKind { AttachmentName.kind(ofExt: ext) }
+
+    public init(id: Int64, fileName: String, ext: String, messageID: String,
+                subject: String?, fromName: String?, fromAddress: String?,
+                date: Date?, filePath: String) {
+        self.id = id; self.fileName = fileName; self.ext = ext; self.messageID = messageID
+        self.subject = subject; self.fromName = fromName; self.fromAddress = fromAddress
+        self.date = date; self.filePath = filePath
+    }
+}
+
 /// İsimle kaydedilmiş bir arama (sorgu + mod). Sorgu operatör/tarih ifadelerini de içerebilir.
 public struct SavedSearch: Sendable, Identifiable, Equatable {
     public let id: String
@@ -309,6 +333,22 @@ public final class IndexStore: Sendable {
             try db.execute(sql: "ALTER TABLE message ADD COLUMN isRead INTEGER")
             try db.execute(sql: "ALTER TABLE message ADD COLUMN isFlagged INTEGER")
         }
+
+        // Faz 10: "Ekler" görünümü — ek adlarını ada/türe göre aranabilir kılan normalize tablo.
+        // Additive: yalnız yeni tablo eklenir; mevcut `message` verisi korunur, parser sürümü
+        // artışıyla (→3) bir kez yeniden indekslenip doldurulur. `messageID` sütunu sahip mesajın
+        // kararlı id'sini (message.id) tutar; mesaj silinince ekleri de gider (ON DELETE CASCADE).
+        migrator.registerMigration("v10_attachments") { db in
+            try db.create(table: "attachment") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("messageID", .text).notNull()
+                    .references("message", onDelete: .cascade)
+                t.column("fileName", .text).notNull()
+                t.column("ext", .text).notNull()
+            }
+            try db.create(index: "idx_attachment_message", on: "attachment", columns: ["messageID"])
+            try db.create(index: "idx_attachment_ext", on: "attachment", columns: ["ext"])
+        }
         return migrator
     }
 
@@ -437,6 +477,89 @@ public final class IndexStore: Sendable {
             try Int.fetchOne(db, sql:
                 "SELECT COUNT(*) FROM message WHERE attachments IS NOT NULL AND attachments <> ''") ?? 0
         }
+    }
+
+    // MARK: - Ekler görünümü (Faz 10)
+
+    /// Bir mesajın ek satırlarını idempotent biçimde yeniden yazar (önce siler, sonra ekler).
+    /// Reindex'te çift kayıt oluşmaz; boş/yalnız boşluk adlar atlanır. `ext` ad üzerinden türetilir.
+    /// Sahip `message` satırı (FK) önceden var olmalıdır.
+    public func replaceAttachments(_ items: [(messageID: String, names: [String])]) throws {
+        guard !items.isEmpty else { return }
+        try dbQueue.write { db in
+            for (messageID, names) in items {
+                try db.execute(sql: "DELETE FROM attachment WHERE messageID = ?", arguments: [messageID])
+                for name in names {
+                    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { continue }
+                    try db.execute(sql:
+                        "INSERT INTO attachment (messageID, fileName, ext) VALUES (?, ?, ?)",
+                        arguments: [messageID, trimmed, AttachmentName.ext(of: trimmed)])
+                }
+            }
+        }
+    }
+
+    /// Tek bir mesajın ek adlarını yeniden yazar (idempotent) — `replaceAttachments(_:)` sarmalayıcısı.
+    public func replaceAttachments(forMessage messageID: String, names: [String]) throws {
+        try replaceAttachments([(messageID, names)])
+    }
+
+    /// Ekleri ada (LIKE) ve/veya türe göre süzüp, sahip mesajla birleştirerek (en yeni önce) döndürür.
+    /// `kind` filtresi uzantı kümesiyle uygulanır: `.other` = bilinen uzantıların hiçbiri değil.
+    public func allAttachments(query: String? = nil, kind: AttachmentKind? = nil,
+                               limit: Int) throws -> [AttachmentRow] {
+        var parts: [String] = []
+        var args: [any DatabaseValueConvertible] = []
+
+        if let query = query?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty {
+            parts.append("a.fileName LIKE ?")          // SQLite LIKE ASCII için zaten harf duyarsız
+            args.append("%\(query)%")
+        }
+        if let kind {
+            if kind == .other {
+                // Bilinen uzantıların hiçbiri değil (uzantısız "" de bilinen değildir → buraya düşer).
+                let known = AttachmentName.knownExtensions
+                parts.append("a.ext NOT IN (\(databaseQuestionMarks(count: known.count)))")
+                args.append(contentsOf: known)
+            } else {
+                let exts = AttachmentName.extensions(for: kind)
+                guard !exts.isEmpty else { return [] }
+                parts.append("a.ext IN (\(databaseQuestionMarks(count: exts.count)))")
+                args.append(contentsOf: exts)
+            }
+        }
+        let whereClause = parts.isEmpty ? "" : "WHERE " + parts.joined(separator: " AND ")
+        args.append(limit)
+
+        return try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT a.id AS id, a.fileName AS fileName, a.ext AS ext, a.messageID AS messageID,
+                       m.subject AS subject, m.fromName AS fromName, m.fromAddress AS fromAddress,
+                       m.date AS date, m.filePath AS filePath
+                FROM attachment a
+                JOIN message m ON m.id = a.messageID
+                \(whereClause)
+                ORDER BY m.date DESC
+                LIMIT ?
+                """, arguments: StatementArguments(args)).map { row in
+                AttachmentRow(
+                    id: row["id"], fileName: row["fileName"], ext: row["ext"],
+                    messageID: row["messageID"], subject: row["subject"],
+                    fromName: row["fromName"], fromAddress: row["fromAddress"],
+                    date: row["date"], filePath: row["filePath"])
+            }
+        }
+    }
+
+    /// Kategori başına ek sayısı (çiplerdeki sayılar için). `ext` Swift'te kategoriye eşlenir.
+    public func attachmentKindCounts() throws -> [AttachmentKind: Int] {
+        let exts = try dbQueue.read { db in
+            try String.fetchAll(db, sql: "SELECT ext FROM attachment")
+        }
+        var counts: [AttachmentKind: Int] = [:]
+        for ext in exts { counts[AttachmentName.kind(ofExt: ext), default: 0] += 1 }
+        return counts
     }
 
     /// Son `months` ayın aylık mail sayıları (en eskiden yeniye, eksik aylar 0 ile doldurulur).

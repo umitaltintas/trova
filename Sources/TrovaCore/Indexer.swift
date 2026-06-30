@@ -25,7 +25,8 @@ public final class CancellationFlag: @unchecked Sendable {
 public enum Indexer {
     /// Parser çıktısı değişince artır → tüm kayıtlar bir kez yeniden indekslenir.
     /// v2: okundu/bayraklı flag'leri (.emlx plist trailer'ından) eklendi.
-    public static let currentParserVersion = 2
+    /// v3: ek adları ayrı `attachment` tablosuna yazılmaya başlandı ("Ekler" görünümü, ada/türe arama).
+    public static let currentParserVersion = 3
 
     public static func run(
         store: IndexStore,
@@ -43,6 +44,8 @@ public enum Indexer {
         var result = IndexResult()
         var batch: [MessageRecord] = []
         batch.reserveCapacity(batchSize)
+        // Aynı partideki mesajların ek adları (byte çıkarmadan, yalnız parse sonucu adlar).
+        var attachmentBatch: [(messageID: String, names: [String])] = []
 
         for message in messages {
             if cancel?.isCancelled == true { break }
@@ -91,18 +94,25 @@ public enum Indexer {
                     parserVersion: currentParserVersion,
                     isRead: flags?.isRead,
                     isFlagged: flags?.isFlagged))
+                // Ek adlarını ayrı tabloya yazmak üzere biriktir (mesaj satırıyla aynı partide).
+                attachmentBatch.append((messageID: id, names: parsed.attachments))
                 result.indexed += 1
             } catch {
                 result.failed += 1
             }
 
             if batch.count >= batchSize {
-                result.inserted += try store.upsert(batch)
+                result.inserted += try store.upsert(batch)           // önce mesaj satırları (FK)
+                try store.replaceAttachments(attachmentBatch)        // sonra ek adları (idempotent)
                 batch.removeAll(keepingCapacity: true)
+                attachmentBatch.removeAll(keepingCapacity: true)
                 progress?(result.processed, total)
             }
         }
-        if !batch.isEmpty { result.inserted += try store.upsert(batch) }
+        if !batch.isEmpty {
+            result.inserted += try store.upsert(batch)
+            try store.replaceAttachments(attachmentBatch)
+        }
         progress?(result.processed, total)
         return result
     }

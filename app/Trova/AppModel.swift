@@ -52,7 +52,7 @@ final class AppModel {
         var running = true
     }
 
-    enum Section: Equatable { case ask, search, digest, people, insights }
+    enum Section: Equatable { case ask, search, digest, people, insights, attachments }
     var section: Section = .ask
 
     // Durum
@@ -72,6 +72,12 @@ final class AppModel {
     // Genel Bakış (insights)
     var monthly: [MonthCount] = []
     var attachmentTotal = 0
+
+    // Ekler görünümü (tüm eklerin ada/türe göre aranabilir listesi)
+    var attachments: [AttachmentRow] = []
+    var attachmentQuery = ""                       // ad araması (LIKE)
+    var attachmentKind: AttachmentKind?            // seçili kategori filtresi (nil → tümü)
+    var attachmentKindCounts: [AttachmentKind: Int] = [:]   // kategori çiplerindeki sayılar
 
     // Sağlık / kurulum (HealthCheck girdileri)
     var llmConfigured = false
@@ -184,6 +190,7 @@ final class AppModel {
         case .digest:   (needsReply + waitingOn).map(\.id)
         case .ask:      conversation.flatMap(\.cited).map(\.id)
         case .insights: []
+        case .attachments: []   // ekler okuma panelinde değil, dosya olarak açılır
         }
     }
 
@@ -313,6 +320,8 @@ final class AppModel {
         case .people:
             loadPeople()
             if let address = selectedPersonAddress { selectPerson(address) }
+        case .attachments:
+            loadAttachments()         // mevcut arama/filtreyle ek listesini tazele
         case .ask:
             break                     // açık sohbeti elleme
         }
@@ -374,6 +383,61 @@ final class AppModel {
         loadPeople()
         loadSavedSearches()
         loadInsights()
+        loadAttachments()
+    }
+
+    /// Ekler görünümünü tazeler: mevcut ad araması + kategori filtresine uyan ekleri ve
+    /// kategori çip sayılarını arka planda yükler.
+    func loadAttachments() {
+        let q = attachmentQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kind = attachmentKind
+        Task {
+            guard let data = await background({ () -> (rows: [AttachmentRow], counts: [AttachmentKind: Int]) in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                return (try store.allAttachments(query: q.isEmpty ? nil : q, kind: kind, limit: 500),
+                        try store.attachmentKindCounts())
+            }) else { return }
+            attachments = data.rows
+            attachmentKindCounts = data.counts
+        }
+    }
+
+    /// Bir ek satırını açar: sahip `.emlx`'ten eki ada göre çıkarıp geçici dosyaya yazar ve sistemde açar.
+    /// (Mevcut `extractAttachments` akışını yeniden kullanır; satır zaten `filePath` taşır.)
+    func openAttachmentRow(_ row: AttachmentRow) {
+        Task {
+            let result = await background { () -> URL? in
+                guard let data = try? Data(contentsOf: URL(fileURLWithPath: row.filePath)) else { return nil }
+                guard let att = EMLXParser.extractAttachments(data: data)
+                    .first(where: { $0.filename == row.fileName }) else { return nil }
+                // Dosya adını güvenli kıl (yol bileşeni kaçışını önle).
+                let safe = (att.filename as NSString).lastPathComponent
+                let fileName = safe.isEmpty ? "ek" : safe
+                let dir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("trova-ekler", isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let fileURL = dir.appendingPathComponent(fileName)
+                try att.data.write(to: fileURL)
+                return fileURL
+            }
+            guard let url = result.flatMap({ $0 }) else {
+                errorMessage = "Ek açılamadı: \(row.fileName)"; return
+            }
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Ek satırının sahip mailini native Apple Mail.app'te açar (RFC822 Message-ID'yi bularak).
+    func openRowInMail(_ row: AttachmentRow) {
+        Task {
+            let rfc = await background {
+                try IndexStore(path: AppPaths.databaseURL).messageID(forID: row.messageID)
+            }
+            guard let url = MailLink.appleMailURL(messageID: rfc.flatMap({ $0 })) else {
+                errorMessage = "Bu mailin Message-ID'si kayıtlı değil; Mail'de açılamıyor."; return
+            }
+            NSWorkspace.shared.open(url)
+        }
     }
 
     /// Kayıtlı aramaları arka planda tazeler.
