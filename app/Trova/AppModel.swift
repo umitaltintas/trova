@@ -110,7 +110,8 @@ final class AppModel {
     // Arama
     var query = ""
     var mode: SearchMode = .hybrid
-    var results: [SearchHit] = []
+    var results: [SearchHit] = []            // ham, alaka sıralı sonuçlar (arama motorundan)
+    var resultSort: ResultSort = .relevance  // kullanıcının seçtiği gösterim sıralaması
     var selection: SearchHit.ID?
     var selectedBody: String?
     var selectedHTML: String?
@@ -183,6 +184,12 @@ final class AppModel {
         recentSearches = RecentSearchesStore.load()
     }
 
+    /// Arama sonuçlarının gösterim listesi: ham `results` üzerine seçili sıralama uygulanır.
+    /// `resultSort` değişince YENİDEN SORGU yapılmaz; yalnız bu liste yeniden hesaplanır.
+    var sortedResults: [SearchHit] {
+        ResultSorter.sort(results, by: resultSort)
+    }
+
     var selectedHit: SearchHit? {
         guard let selection else { return nil }
         func find(_ hits: [SearchHit]) -> SearchHit? { hits.first { $0.id == selection } }
@@ -198,7 +205,7 @@ final class AppModel {
     /// Açık bölüme göre klavyeyle gezinilebilir aktif mail id listesi (görünen sırayla).
     var navigableIDs: [String] {
         switch section {
-        case .search:   results.map(\.id)
+        case .search:   sortedResults.map(\.id)
         case .people:   personMails.map(\.id)
         case .digest:   (needsReply + waitingOn).map(\.id)
         case .ask:      conversation.flatMap(\.cited).map(\.id)
@@ -253,7 +260,8 @@ final class AppModel {
     func exportSearchResults() -> String {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = q.isEmpty ? "Arama sonuçları" : "Arama: \(q)"
-        return MarkdownExporter.emailList(title: title, items: listItems(results))
+        // Dışa aktarım kullanıcının gördüğü sırayı (seçili sıralama) izler.
+        return MarkdownExporter.emailList(title: title, items: listItems(sortedResults))
     }
 
     /// Seçili kişinin maillerini Markdown listesine döker. Başlık: kişinin adı (yoksa adresi).
@@ -816,7 +824,7 @@ final class AppModel {
             expansionChips = outcome?.terms ?? []
             // Genişletme (PRF) terimlerini de vurgu listesine kat (temizlenmiş sorgu + genişletme).
             highlightTerms = AppModel.highlightTerms(query: q, expansion: outcome?.terms ?? [])
-            selection = results.first?.id
+            selection = sortedResults.first?.id   // gösterilen sıranın ilk satırını seç
             loadSelected()
         }
     }

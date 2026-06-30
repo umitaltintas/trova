@@ -404,17 +404,24 @@ private struct SearchColumn: View {
                               || !model.filterAccount.isEmpty || model.dateRange != .all),
                     action: { model.runIndex() })
             } else {
-                // Sonuç sayısı + listeyi Markdown'a dışa aktarma (yalnız sonuç varken).
+                // Sonuç sayısı + sıralama seçimi + listeyi Markdown'a dışa aktarma (yalnız sonuç varken).
                 HStack(spacing: 8) {
                     Text("\(model.results.count) sonuç").font(.system(size: 11)).foregroundStyle(Theme.muted)
                     Spacer()
+                    // Sıralama yalnız gösterimi etkiler; değişimi yeniden sorgu YAPMAZ.
+                    Picker("Sırala", selection: $model.resultSort) {
+                        ForEach(ResultSort.allCases, id: \.self) { sort in
+                            Text(sort.label).tag(sort)
+                        }
+                    }
+                    .labelsHidden().pickerStyle(.menu).controlSize(.small).fixedSize()
                     ListExportMenu(markdown: { model.exportSearchResults() },
                                    filename: model.query.isEmpty ? "Arama sonuçları" : "Arama \(model.query)",
                                    labelText: "Sonuçları dışa aktar")
                 }
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 List(selection: $model.selection) {
-                    ForEach(model.results) { hit in
+                    ForEach(model.sortedResults) { hit in
                         ResultRow(hit: hit, terms: model.highlightTerms)
                             .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
                             .listRowSeparator(.hidden)
