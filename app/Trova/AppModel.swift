@@ -121,6 +121,7 @@ final class AppModel {
     var detectedDateLabel: String?       // sorgudan algılanan Türkçe tarih ifadesi etiketi (örn. "son 7 gün")
     var searchFromLabel: String?         // from:/gönderen: operatörü etiketi
     var searchHasAttachment = false      // has:attachment operatörü etkin mi
+    var searchAttachmentKind: AttachmentKind?   // has:<tür> operatörüyle seçilen ek türü (çip için)
     var expansionChips: [String] = []    // PRF ile sorguya eklenen terimler (gösterim)
     var highlightTerms: [String] = []    // sonuç snippet'lerinde vurgulanacak terimler (temizlenmiş sorgu + genişletme)
 
@@ -645,6 +646,7 @@ final class AppModel {
         detectedDateLabel = parsed.hint?.label
         searchFromLabel = ops.fromContains
         searchHasAttachment = ops.hasAttachment
+        searchAttachmentKind = ops.attachmentKind
         let q = parsed.hint != nil ? parsed.cleaned : ops.cleaned
         // Geçerli bir arama metni varsa (yalnız operatör/tarih değil — browse fallback hariç)
         // ham kullanıcı sorgusunu otomatik geçmişe ekle.
@@ -656,6 +658,7 @@ final class AppModel {
         let filter = SearchFilter(
             accountID: filterAccount.isEmpty ? nil : filterAccount, since: since, until: until,
             fromContains: ops.fromContains, hasAttachment: ops.hasAttachment,
+            attachmentKind: ops.attachmentKind,
             unreadOnly: unreadOnly, flaggedOnly: flaggedOnly)
         // PRF (sorgu genişletme) ayarı: açıksa ilk sonuçlardan terim çıkarıp sorguya eklenir.
         let prf = UserDefaults.standard.bool(forKey: SettingsKeys.queryExpansion)
@@ -792,6 +795,12 @@ final class AppModel {
     /// Seçili mailden verilen adlı eki çıkarıp geçici bir dosyaya yazar ve sistemde açar.
     func openAttachment(named name: String) {
         guard let id = selection else { return }
+        openAttachment(named: name, messageID: id)
+    }
+
+    /// Belirli bir mailden (id) verilen adlı eki çıkarıp geçici bir dosyaya yazar ve sistemde açar.
+    /// Seçili maile bağlı değildir; sonuç satırındaki eşleşen-ek rozetlerinden doğrudan açmak için.
+    func openAttachment(named name: String, messageID id: String) {
         Task {
             let result = await background { () -> URL? in
                 let store = try IndexStore(path: AppPaths.databaseURL)

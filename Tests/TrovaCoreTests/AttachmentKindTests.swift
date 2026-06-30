@@ -58,4 +58,28 @@ final class AttachmentKindTests: XCTestCase {
         XCTAssertEqual(AttachmentKind.sheet.label, "Tablo")
         XCTAssertEqual(AttachmentKind.other.label, "Diğer")
     }
+
+    // MARK: - extensions
+
+    func testExtensionsForKnownKinds() {
+        XCTAssertEqual(AttachmentKind.pdf.extensions, ["pdf"])
+        // Görsel uzantıları (AttachmentName eşlemesiyle tutarlı).
+        XCTAssertEqual(AttachmentKind.image.extensions, ["png", "jpg", "jpeg", "gif", "heic", "webp"])
+        XCTAssertTrue(AttachmentKind.sheet.extensions.contains("xlsx"))
+        XCTAssertTrue(AttachmentKind.code.extensions.contains("swift"))
+    }
+
+    func testExtensionsConsistentWithKindMapping() {
+        // Her kategori uzantısı, ada göre yine aynı kategoriye çözülmelidir (tek kaynak garantisi).
+        for kind in AttachmentKind.allCases where kind != .other {
+            for ext in kind.extensions {
+                XCTAssertEqual(AttachmentName.kind(of: "dosya.\(ext)"), kind,
+                               "\(ext) → \(kind) bekleniyordu")
+            }
+        }
+    }
+
+    func testOtherHasNoDirectExtensions() {
+        XCTAssertTrue(AttachmentKind.other.extensions.isEmpty)
+    }
 }

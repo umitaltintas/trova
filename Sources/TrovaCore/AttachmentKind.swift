@@ -20,6 +20,13 @@ public enum AttachmentKind: String, CaseIterable, Sendable {
         }
     }
 
+    /// Bu kategoriye düşen bilinen dosya uzantıları (SQL `ext IN (...)` filtresi ve testler için).
+    /// `AttachmentName` uzantı→kategori eşlemesiyle tek kaynaktan türetilir (tutarlılık garantisi).
+    /// `.other` için boş küme döner (hiçbir uzantı doğrudan `.other`'a eşlenmez).
+    public var extensions: Set<String> {
+        Set(AttachmentName.extensions(for: self))
+    }
+
     /// Kategoriyi temsil eden SF Symbol adı.
     public var systemImage: String {
         switch self {

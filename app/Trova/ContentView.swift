@@ -367,11 +367,15 @@ private struct SearchColumn: View {
             .padding(.horizontal, 14).padding(.top, 8)
 
             if model.detectedDateLabel != nil || model.searchFromLabel != nil
-                || model.searchHasAttachment || !model.expansionChips.isEmpty {
+                || model.searchHasAttachment || model.searchAttachmentKind != nil
+                || !model.expansionChips.isEmpty {
                 HStack(spacing: 6) {
                     if let label = model.detectedDateLabel { Chip(text: label, systemImage: "calendar") }
                     if let from = model.searchFromLabel { Chip(text: from, systemImage: "person") }
                     if model.searchHasAttachment { Chip(text: "ekli", systemImage: "paperclip") }
+                    if let kind = model.searchAttachmentKind {
+                        Chip(text: "Ek türü: \(kind.label)", systemImage: kind.systemImage)
+                    }
                     ForEach(model.expansionChips, id: \.self) { Chip(text: "+\($0)", systemImage: "plus.magnifyingglass") }
                     Spacer()
                 }
@@ -509,6 +513,7 @@ private struct SavedSearchButton: View {
 }
 
 private struct ResultRow: View {
+    @Environment(AppModel.self) private var model
     let hit: SearchHit
     var terms: [String] = []          // vurgulanacak arama terimleri (AppModel.highlightTerms)
 
@@ -519,6 +524,11 @@ private struct ResultRow: View {
             .replacingOccurrences(of: "«", with: "")
             .replacingOccurrences(of: "»", with: "")
         return SnippetExtractor.make(body: clean, terms: terms)
+    }
+
+    /// Arama terimleriyle adı eşleşen ek(ler) — sonuçta "hangi ek tuttu" rozeti için.
+    private var matchedAttachments: [String] {
+        AttachmentMatch.matching(names: hit.attachments, terms: terms)
     }
 
     var body: some View {
@@ -546,9 +556,39 @@ private struct ResultRow: View {
                     Text(AttributedString(snippet: snippet))
                         .font(.system(size: 11)).lineLimit(2)
                 }
+                if !matchedAttachments.isEmpty {
+                    MatchedAttachmentChips(names: matchedAttachments) { name in
+                        model.openAttachment(named: name, messageID: hit.id)
+                    }
+                }
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// Arama terimiyle eşleşen ek adlarını küçük tıklanabilir çiplerle gösterir (en çok 3, fazlası "+N").
+/// Bir çipe dokununca o ek sahip mailden çıkarılıp sistemde açılır.
+private struct MatchedAttachmentChips: View {
+    let names: [String]
+    let open: (String) -> Void
+
+    private let maxVisible = 3
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(names.prefix(maxVisible), id: \.self) { name in
+                Button { open(name) } label: {
+                    Chip(text: name, systemImage: "paperclip")
+                }
+                .buttonStyle(.plain).help("Eki aç: \(name)")
+            }
+            if names.count > maxVisible {
+                Chip(text: "+\(names.count - maxVisible)")
+                    .help(names.dropFirst(maxVisible).joined(separator: ", "))
+            }
+        }
+        .padding(.top, 1)
     }
 }
 

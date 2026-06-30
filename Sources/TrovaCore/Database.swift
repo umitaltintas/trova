@@ -113,18 +113,21 @@ public struct SearchFilter: Sendable, Equatable {
     public var until: Date?
     public var fromContains: String?      // gönderen adı/e-postasında geçen metin (from: operatörü)
     public var hasAttachment: Bool        // yalnızca ekli mailler (has:attachment operatörü)
+    public var attachmentKind: AttachmentKind?  // yalnızca belirli türde eki olan mailler (has:pdf gibi; nil → etkisiz)
     public var unreadOnly: Bool           // yalnızca okunmamış mailler (isRead = 0)
     public var flaggedOnly: Bool          // yalnızca bayraklı mailler (isFlagged = 1)
     public init(accountID: String? = nil, since: Date? = nil, until: Date? = nil,
                 fromContains: String? = nil, hasAttachment: Bool = false,
+                attachmentKind: AttachmentKind? = nil,
                 unreadOnly: Bool = false, flaggedOnly: Bool = false) {
         self.accountID = accountID; self.since = since; self.until = until
         self.fromContains = fromContains; self.hasAttachment = hasAttachment
+        self.attachmentKind = attachmentKind
         self.unreadOnly = unreadOnly; self.flaggedOnly = flaggedOnly
     }
     public var isEmpty: Bool {
         accountID == nil && since == nil && until == nil && fromContains == nil
-            && !hasAttachment && !unreadOnly && !flaggedOnly
+            && !hasAttachment && attachmentKind == nil && !unreadOnly && !flaggedOnly
     }
 }
 
@@ -893,6 +896,23 @@ public final class IndexStore: Sendable {
         }
         if filter.hasAttachment {
             parts.append("(m.attachments IS NOT NULL AND m.attachments <> '')")
+        }
+        // Ek türü filtresi: `attachment` tablosunda ilgili uzantılardan en az bir ek olan mailler.
+        // `.other` = bilinen uzantıların hiçbiri değil (uzantısız adlar dahil).
+        if let kind = filter.attachmentKind {
+            if kind == .other {
+                let known = AttachmentName.knownExtensions
+                parts.append("EXISTS (SELECT 1 FROM attachment a WHERE a.messageID = m.id "
+                    + "AND a.ext NOT IN (\(databaseQuestionMarks(count: known.count))))")
+                args.append(contentsOf: known)
+            } else {
+                let exts = AttachmentName.extensions(for: kind)
+                if !exts.isEmpty {
+                    parts.append("EXISTS (SELECT 1 FROM attachment a WHERE a.messageID = m.id "
+                        + "AND a.ext IN (\(databaseQuestionMarks(count: exts.count))))")
+                    args.append(contentsOf: exts)
+                }
+            }
         }
         if filter.unreadOnly { parts.append("m.isRead = 0") }
         if filter.flaggedOnly { parts.append("m.isFlagged = 1") }
