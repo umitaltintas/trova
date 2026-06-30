@@ -112,63 +112,70 @@ private struct Sidebar: View {
 
     var body: some View {
         @Bindable var model = model
-        // Tüm kenar çubuğu içeriği bir ScrollView içinde: pencere yüksekliği küçük olduğunda
-        // içerik KIRPILMAK yerine KAYDIRILIR; hiçbir üst kontrol erişilemez kalmaz. Bölüm
-        // navigasyonu (ModeButton'lar) scroll'un en başında olduğundan her zaman erişilebilir.
-        // GeometryReader + minHeight: uzun pencerede mevcut "alt sabit" yerleşimi (Sağlık +
-        // Otomatik senkron en altta) korur; kısa pencerede içerik doğal boyuna büyüyüp kaydırılır.
-        GeometryReader { geo in
-        ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 8) {
-                Image(systemName: "tray.full.fill")
-                    .font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.accent)
-                Text("Trova").font(.rounded(19, .bold)).foregroundStyle(Theme.ink)
-                Spacer()
-                Text("⌘K").font(.mono(10)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Theme.card, in: Capsule())
-                    .overlay(Capsule().stroke(Theme.line))
-                    .help("Komut paleti")
-            }
-            .padding(.top, 4)
+        // Kenar çubuğu iki parçaya ayrıldı:
+        //  (1) ÜSTTE kaydırılabilir bölüm (ScrollView) — başlık + bölüm navigasyonu (ModeButton'lar) +
+        //      durum + filtre. ScrollView her zaman EN ÜSTTEN (başlık + Sor/Ara) başlar; içerik uzun
+        //      olsa bile üst kontroller kırpılmaz, kaydırarak erişilir.
+        //  (2) ALTTA sabit bölüm — sağlık rozeti + otomatik senkron; kısa pencerede bile hep görünür.
+        // ESKİ yaklaşım (GeometryReader + .frame(minHeight: geo.height) + Spacer) kısa pencerede
+        // içeriği dikeyde ORTALAYIP üst (başlık+ModeButton) ve altı (Toggle) KIRPIYORDU; yalnız
+        // ortadaki FilterBlock görünür kalıyordu. Bu yapı o hatayı tamamen giderir.
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "tray.full.fill")
+                            .font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.accent)
+                        Text("Trova").font(.rounded(19, .bold)).foregroundStyle(Theme.ink)
+                        Spacer()
+                        Text("⌘K").font(.mono(10)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Theme.card, in: Capsule())
+                            .overlay(Capsule().stroke(Theme.line))
+                            .help("Komut paleti")
+                    }
+                    .padding(.top, 4)
 
-            VStack(spacing: 5) {
-                ModeButton(title: "Sor", subtitle: "AI ile bul + özetle",
-                           icon: "sparkles", active: model.section == .ask) { model.section = .ask }
-                ModeButton(title: "Ara", subtitle: "Kelime / anlamsal",
-                           icon: "magnifyingglass", active: model.section == .search) { model.section = .search }
-                ModeButton(title: "Bugün", subtitle: "Brifing + yanıt bekleyenler",
-                           icon: "sun.max", active: model.section == .digest,
-                           badge: BadgeCount.label(model.pendingReplyCount)) { model.section = .digest }
-                ModeButton(title: "Kişiler", subtitle: "En çok yazışılanlar",
-                           icon: "person.2", active: model.section == .people) {
-                    model.section = .people; model.selectedPersonAddress = nil
+                    VStack(spacing: 5) {
+                        ModeButton(title: "Sor", subtitle: "AI ile bul + özetle",
+                                   icon: "sparkles", active: model.section == .ask) { model.section = .ask }
+                        ModeButton(title: "Ara", subtitle: "Kelime / anlamsal",
+                                   icon: "magnifyingglass", active: model.section == .search) { model.section = .search }
+                        ModeButton(title: "Bugün", subtitle: "Brifing + yanıt bekleyenler",
+                                   icon: "sun.max", active: model.section == .digest,
+                                   badge: BadgeCount.label(model.pendingReplyCount)) { model.section = .digest }
+                        ModeButton(title: "Kişiler", subtitle: "En çok yazışılanlar",
+                                   icon: "person.2", active: model.section == .people) {
+                            model.section = .people; model.selectedPersonAddress = nil
+                        }
+                        ModeButton(title: "Genel Bakış", subtitle: "İstatistik + aylık hacim",
+                                   icon: "chart.bar", active: model.section == .insights) { model.section = .insights }
+                        ModeButton(title: "Ekler", subtitle: "Ada/türe göre ara + aç",
+                                   icon: "paperclip", active: model.section == .attachments) { model.section = .attachments }
+                    }
+
+                    StatusBlock()
+                    FilterBlock()
                 }
-                ModeButton(title: "Genel Bakış", subtitle: "İstatistik + aylık hacim",
-                           icon: "chart.bar", active: model.section == .insights) { model.section = .insights }
-                ModeButton(title: "Ekler", subtitle: "Ada/türe göre ara + aç",
-                           icon: "paperclip", active: model.section == .attachments) { model.section = .attachments }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
 
-            StatusBlock()
-            FilterBlock()
-            Spacer(minLength: 16)
+            Divider().overlay(Theme.line)
 
-            HealthPill()
+            // Alt sabit blok: sağlık + otomatik senkron. Scroll dışında olduğundan kısa pencerede de görünür.
+            VStack(alignment: .leading, spacing: 10) {
+                HealthPill()
 
-            Toggle(isOn: $autoSync) {
-                Label("Otomatik senkron", systemImage: "bolt.fill").font(.system(size: 12))
+                Toggle(isOn: $autoSync) {
+                    Label("Otomatik senkron", systemImage: "bolt.fill").font(.system(size: 12))
+                }
+                .toggleStyle(.switch).controlSize(.mini).tint(Theme.accent)
+                .disabled(!model.hasAccess)
+                .onChange(of: autoSync) { _, on in model.setAutoSync(on) }
             }
-            .toggleStyle(.switch).controlSize(.mini).tint(Theme.accent)
-            .disabled(!model.hasAccess)
-            .onChange(of: autoSync) { _, on in model.setAutoSync(on) }
-        }
-        .padding(14)
-        // minHeight = görünür alan: içerik kısaysa Spacer alt blokları aşağı iter (mevcut görünüm);
-        // içerik uzunsa doğal boyuna büyür ve ScrollView devreye girip kaydırır (kırpmaz).
-        .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
-        }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
