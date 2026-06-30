@@ -453,6 +453,17 @@ private struct AskColumn: View {
     @Environment(AppModel.self) private var model
     @State private var showHistory = false
 
+    private var exportedTurns: [ExportedTurn] {
+        model.conversation.filter { !$0.answer.isEmpty }
+            .map { ExportedTurn(question: $0.question, answer: $0.answer, citations: $0.cited) }
+    }
+    private var conversationTitle: String {
+        model.conversation.first.map { "Trova: " + String($0.question.prefix(40)) } ?? "Trova sohbeti"
+    }
+    private var conversationMarkdown: String {
+        MarkdownExporter.conversation(exportedTurns, title: conversationTitle)
+    }
+
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
@@ -492,6 +503,18 @@ private struct AskColumn: View {
                         ConversationHistoryList(dismiss: { showHistory = false })
                     }
                 if !model.conversation.isEmpty && !model.isAsking {
+                    if !exportedTurns.isEmpty {
+                        Menu {
+                            Button("Markdown kopyala") { Exporter.copy(conversationMarkdown) }
+                            Button("Dışa aktar (.md)") {
+                                Exporter.save(conversationMarkdown, suggestedName: conversationTitle)
+                            }
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                        .fixedSize().foregroundStyle(Theme.muted).help("Sohbeti dışa aktar")
+                    }
                     Button { model.newConversation() } label: { Image(systemName: "square.and.pencil") }
                         .buttonStyle(.plain).foregroundStyle(Theme.muted).help("Yeni sohbet")
                 }

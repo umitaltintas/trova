@@ -58,4 +58,28 @@ final class MarkdownExporterTests: XCTestCase {
         XCTAssertTrue(md.contains("**Gönderen:** Bilinmeyen gönderen"))
         XCTAssertTrue(md.contains("özet"))   // snippet'e düşer
     }
+
+    // MARK: - Sohbet
+
+    func testConversationExport() {
+        let turns = [
+            ExportedTurn(question: "İlk soru?", answer: "İlk yanıt.",
+                         citations: [hit("1", subject: "Fatura", name: "Ali", addr: "ali@x.com")]),
+            ExportedTurn(question: "Takip?", answer: "İkinci yanıt."),
+        ]
+        let md = MarkdownExporter.conversation(turns, title: "Test Sohbeti")
+        XCTAssertTrue(md.hasPrefix("# Test Sohbeti\n"))
+        XCTAssertTrue(md.contains("## 1. İlk soru?"))
+        XCTAssertTrue(md.contains("İlk yanıt."))
+        XCTAssertTrue(md.contains("**Kaynaklar:**"))
+        XCTAssertTrue(md.contains("**Fatura**"))
+        XCTAssertTrue(md.contains("## 2. Takip?"))
+        XCTAssertTrue(md.contains("İkinci yanıt."))
+        XCTAssertTrue(md.contains("_Trova ile dışa aktarıldı_"))
+    }
+
+    func testEmptyConversation() {
+        let md = MarkdownExporter.conversation([], title: "Boş")
+        XCTAssertTrue(md.contains("(boş sohbet)"))
+    }
 }

@@ -1,5 +1,15 @@
 import Foundation
 
+/// Dışa aktarılacak bir sohbet turu (soru + yanıt + kaynak mailler).
+public struct ExportedTurn: Sendable {
+    public let question: String
+    public let answer: String
+    public let citations: [SearchHit]
+    public init(question: String, answer: String, citations: [SearchHit] = []) {
+        self.question = question; self.answer = answer; self.citations = citations
+    }
+}
+
 /// Arama/AI çıktısını paylaşılabilir Markdown metnine dönüştürür (panoya kopyalama veya .md kaydı için).
 /// Saf metin üretimi — yan etkisiz, test edilebilir.
 public enum MarkdownExporter {
@@ -14,6 +24,22 @@ public enum MarkdownExporter {
             out += "\n## Kaynaklar\n\n"
             for (i, hit) in citations.enumerated() {
                 out += "\(i + 1). \(citationLine(hit))\n"
+            }
+        }
+        out += "\n---\n_Trova ile dışa aktarıldı_\n"
+        return out
+    }
+
+    /// Tüm bir "Sor" sohbetini (soru/yanıt/kaynak turları) tek bir Markdown belgesine döker.
+    public static func conversation(_ turns: [ExportedTurn], title: String = "Trova sohbeti") -> String {
+        guard !turns.isEmpty else { return "# \(title)\n\n_(boş sohbet)_\n" }
+        var out = "# \(title)\n"
+        for (i, turn) in turns.enumerated() {
+            out += "\n## \(i + 1). \(trimmedOrPlaceholder(turn.question, "Soru"))\n\n"
+            out += "\(turn.answer.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+            if !turn.citations.isEmpty {
+                out += "\n**Kaynaklar:**\n"
+                for hit in turn.citations { out += "- \(citationLine(hit))\n" }
             }
         }
         out += "\n---\n_Trova ile dışa aktarıldı_\n"
