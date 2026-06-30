@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("autoSync") private var autoSync = false
+    @State private var showPalette = false
 
     var body: some View {
         NavigationSplitView {
@@ -28,6 +29,26 @@ struct ContentView: View {
             if phase == .active { model.refreshAccess(); model.refreshStatus() }
         }
         .overlay(alignment: .bottom) { ErrorBanner() }
+        .background { KeyboardShortcuts(showPalette: $showPalette) }
+        .sheet(isPresented: $showPalette) { CommandPaletteView().environment(model) }
+    }
+}
+
+/// Görünmez düğmelerle global klavye kısayolları: ⌘K palet, ⌘1–4 bölümler.
+private struct KeyboardShortcuts: View {
+    @Environment(AppModel.self) private var model
+    @Binding var showPalette: Bool
+
+    var body: some View {
+        Group {
+            Button("") { showPalette.toggle() }.keyboardShortcut("k", modifiers: .command)
+            Button("") { model.section = .ask }.keyboardShortcut("1", modifiers: .command)
+            Button("") { model.section = .search }.keyboardShortcut("2", modifiers: .command)
+            Button("") { model.section = .digest }.keyboardShortcut("3", modifiers: .command)
+            Button("") { model.section = .people; model.selectedPersonAddress = nil }
+                .keyboardShortcut("4", modifiers: .command)
+        }
+        .opacity(0).frame(width: 0, height: 0)
     }
 }
 
@@ -67,6 +88,12 @@ private struct Sidebar: View {
                 Image(systemName: "tray.full.fill")
                     .font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.accent)
                 Text("Trova").font(.rounded(19, .bold)).foregroundStyle(Theme.ink)
+                Spacer()
+                Text("⌘K").font(.mono(10)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Theme.card, in: Capsule())
+                    .overlay(Capsule().stroke(Theme.line))
+                    .help("Komut paleti")
             }
             .padding(.top, 4)
 
