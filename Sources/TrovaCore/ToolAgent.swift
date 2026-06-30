@@ -376,6 +376,16 @@ public struct ToolAgent: Sendable {
             return ("Ek: \(chosen.filename) (\(chosen.mimeType))\n\(text)",
                     AgentStep(kind: .read, detail: "ek: \(chosen.filename)"), [hit])
 
+        case "find_attachments":
+            let name = (args["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let kind = Self.attachmentKind(from: args["kind"] as? String)
+            let from = (args["from"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let limit = (args["limit"] as? Int) ?? 20
+            let rows = findAttachments(name: name, kind: kind, from: from, limit: limit)
+            let text = Self.findAttachmentsText(rows: rows, name: name, kind: kind,
+                                                from: (from?.isEmpty ?? true) ? nil : from)
+            return (text, AgentStep(kind: .search, detail: "ekler: \(rows.count)"), [])
+
         case "overview":
             return (overview(),
                     AgentStep(kind: .note, detail: "posta kutusu özeti"), [])
@@ -393,6 +403,24 @@ public struct ToolAgent: Sendable {
         default:
             return ("Bilinmeyen araç: \(call.name)", AgentStep(kind: .note, detail: call.name), [])
         }
+    }
+
+    /// `find_attachments` aracının DB yolu: ekleri ad/tür ile çeker; `from` (gönderen) verilmişse
+    /// gönderen ad/e-postasında harf duyarsız süzer ve `limit`'e indirir. `allAttachments` gönderen
+    /// filtresi sunmadığından `from` POST-FİLTRE uygulanır; bu yüzden süzmeden ÖNCE geniş bir havuz
+    /// çekilir (aksi halde limit, filtreden önce kayıtları keserdi). I/O'yu ayrı tutar → test edilir.
+    func findAttachments(name: String?, kind: AttachmentKind?, from: String?,
+                         limit: Int) -> [AttachmentRow] {
+        let hasFrom = !(from?.isEmpty ?? true)
+        let fetchLimit = hasFrom ? max(limit, 500) : limit
+        var rows = (try? store.allAttachments(query: name, kind: kind, limit: fetchLimit)) ?? []
+        if hasFrom, let needle = from?.lowercased() {
+            rows = rows.filter {
+                ($0.fromAddress?.lowercased().contains(needle) ?? false)
+                    || ($0.fromName?.lowercased().contains(needle) ?? false)
+            }
+        }
+        return Array(rows.prefix(limit))
     }
 
     /// `overview` aracı: posta kutusunun genel istatistiğini store'dan toplayıp Türkçe
@@ -452,6 +480,46 @@ public struct ToolAgent: Sendable {
         return Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: day) ?? day
     }
 
+    /// `find_attachments` `kind` parametresini (Türkçe etiket / İngilizce eşanlamlı / enum adı)
+    /// `AttachmentKind`'a eşler. Boş/bilinmeyen → nil (tür filtresi uygulanmaz).
+    static func attachmentKind(from raw: String?) -> AttachmentKind? {
+        guard let key = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !key.isEmpty else { return nil }
+        switch key {
+        case "pdf":                                              return .pdf
+        case "görsel", "gorsel", "image", "resim", "foto", "fotoğraf": return .image
+        case "tablo", "sheet", "excel", "spreadsheet":           return .sheet
+        case "belge", "doc", "document", "döküman", "doküman", "word": return .doc
+        case "sunum", "presentation", "slayt", "slide":          return .presentation
+        case "arşiv", "arsiv", "archive", "zip":                 return .archive
+        case "ses", "audio":                                     return .audio
+        case "video":                                            return .video
+        case "kod", "code":                                      return .code
+        case "diğer", "diger", "other":                          return .other
+        default:                                                 return nil
+        }
+    }
+
+    /// `find_attachments` aracının saf Türkçe biçimlendiricisi (I/O içermez → kolayca test edilir).
+    /// Üst satırda (boş olmayan) ölçütler + bulunan ek sayısı; her satır "dosya adı · gönderen · tarih".
+    /// Sonuç yoksa "ek bulunamadı" döner (ölçütler yine parantezde listelenir). Tarih `RelativeTime`
+    /// ile okunur kısaltılır (TR diakritikli, deterministik).
+    static func findAttachmentsText(rows: [AttachmentRow], name: String?, kind: AttachmentKind?,
+                                    from: String?, calendar: Calendar = .current) -> String {
+        var criteria: [String] = []
+        if let name, !name.isEmpty { criteria.append("ad: \(name)") }
+        if let kind { criteria.append("tür: \(kind.label)") }
+        if let from, !from.isEmpty { criteria.append("gönderen: \(from)") }
+        let suffix = criteria.isEmpty ? "" : " (\(criteria.joined(separator: ", ")))"
+        guard !rows.isEmpty else { return "Ölçütlere uyan ek bulunamadı\(suffix)." }
+        let lines = rows.map { row -> String in
+            let sender = row.fromName ?? row.fromAddress ?? "-"
+            let date = row.date.map { RelativeTime.absolute($0, calendar: calendar) } ?? "-"
+            return "- \(row.fileName) · \(sender) · \(date)"
+        }
+        return "\(rows.count) ek bulundu\(suffix):\n" + lines.joined(separator: "\n")
+    }
+
     private func describe(handle: String, hit: SearchHit) -> String {
         let date = hit.date.map(Self.isoDate) ?? "-"
         let attachments = hit.attachments.isEmpty ? "" : " [ek: \(hit.attachments.joined(separator: ", "))]"
@@ -473,6 +541,8 @@ public struct ToolAgent: Sendable {
           soruları ("kaç ...", "ne kadar ...") için; içerik değil yalnız sayı gerektiğinde kullan.
         - list_thread / summarize_thread: bir konunun mailleri (özet listesi / tam gövdeler).
         - read_attachment: PDF/görsel/metin ekten içerik çıkar (fatura, fiş, sözleşme için — OCR dahil).
+        - find_attachments: ekleri ada/türe (pdf/görsel/tablo...)/gönderene göre LİSTELE (mail içeriği
+          değil, ek dosyaları). "hangi PDF'ler geldi", "X'in gönderdiği ekler" gibi sorular için.
         - overview: posta kutusu genel istatistiği (toplam mail, hesaplar, ekler, aylık dağılım).
         - remember: kullanıcı hakkında kalıcı, gelecekte işe yarayacak bir bilgiyi sakla
           (tercih, tekrarlayan kişi/proje, "haber bültenlerini hep özetle" gibi kalıcı talimat).
@@ -577,6 +647,25 @@ public struct ToolAgent: Sendable {
                     "filename": ["type": "string", "description": "Belirli bir ek adı (opsiyonel; yoksa ilk ek)"],
                 ],
                 "required": ["handle"],
+            ],
+        ]],
+        ["type": "function", "function": [
+            "name": "find_attachments",
+            "description": "E-posta EKLERİNİ ada/türe/gönderene göre listeler (mail içeriği değil, "
+                + "ek dosyaları). 'hangi PDF'ler', 'X'in gönderdiği ekler' gibi sorular için.",
+            "parameters": [
+                "type": "object",
+                "properties": [
+                    "name": ["type": "string",
+                             "description": "Dosya adında geçen metin (opsiyonel)"],
+                    "kind": ["type": "string",
+                             "enum": ["pdf", "görsel", "tablo", "belge", "sunum",
+                                      "arşiv", "ses", "video", "kod"],
+                             "description": "Ek türü (opsiyonel)"],
+                    "from": ["type": "string",
+                             "description": "Gönderen adı/e-postasında geçen metin (opsiyonel)"],
+                    "limit": ["type": "integer", "description": "Sonuç sayısı (varsayılan 20)"],
+                ],
             ],
         ]],
         ["type": "function", "function": [
