@@ -788,22 +788,43 @@ private struct PersonDetailHeader: View {
 
     private var person: SenderStat? { model.people.first { $0.address == address } }
 
+    private static let dateFormat: Date.FormatStyle = .dateTime.month(.abbreviated).year()
+
     var body: some View {
-        HStack(spacing: 10) {
-            Button {
-                model.selectedPersonAddress = nil
-                model.personMails = []
-            } label: {
-                Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Button {
+                    model.selectedPersonAddress = nil
+                    model.personMails = []
+                    model.personDetail = nil
+                } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold))
+                }
+                .buttonStyle(.plain).foregroundStyle(Theme.accent).help("Kişilere dön")
+                Avatar(name: person?.name, email: address, size: 32)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(person?.name ?? address).font(.rounded(14, .semibold))
+                        .foregroundStyle(Theme.ink).lineLimit(1)
+                    if person?.name != nil {
+                        Text(address).font(.system(size: 10)).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                }
+                Spacer()
             }
-            .buttonStyle(.plain).foregroundStyle(Theme.accent).help("Kişilere dön")
-            Avatar(name: person?.name, email: address, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(person?.name ?? address).font(.rounded(14, .semibold))
-                    .foregroundStyle(Theme.ink).lineLimit(1)
-                Text("\(model.personMails.count) mail").font(.system(size: 11)).foregroundStyle(Theme.muted)
+
+            if let detail = model.personDetail {
+                HStack(spacing: 6) {
+                    Chip(text: "\(detail.total) mail", systemImage: "envelope")
+                    if detail.withAttachments > 0 {
+                        Chip(text: "\(detail.withAttachments) ekli", systemImage: "paperclip")
+                    }
+                    if let first = detail.firstDate, let last = detail.lastDate {
+                        Chip(text: "\(first.formatted(Self.dateFormat)) – \(last.formatted(Self.dateFormat))",
+                             systemImage: "calendar")
+                    }
+                    Spacer()
+                }
             }
-            Spacer()
         }
         .padding(14)
     }

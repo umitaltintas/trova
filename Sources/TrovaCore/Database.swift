@@ -79,6 +79,18 @@ public struct SenderStat: Sendable, Equatable, Identifiable {
     }
 }
 
+/// Bir kişinin mini analitiği ("Kişiler" detayında gösterilir).
+public struct SenderDetail: Sendable, Equatable {
+    public let total: Int
+    public let withAttachments: Int
+    public let firstDate: Date?
+    public let lastDate: Date?
+    public init(total: Int, withAttachments: Int, firstDate: Date?, lastDate: Date?) {
+        self.total = total; self.withAttachments = withAttachments
+        self.firstDate = firstDate; self.lastDate = lastDate
+    }
+}
+
 /// Arama filtresi: hesap ve tarih aralığı.
 public struct SearchFilter: Sendable, Equatable {
     public var accountID: String?
@@ -356,6 +368,25 @@ public final class IndexStore: Sendable {
             try Int.fetchOne(db, sql:
                 "SELECT COUNT(*) FROM message WHERE fromName LIKE ? OR fromAddress LIKE ?",
                 arguments: [like, like]) ?? 0
+        }
+    }
+
+    /// Bir kişinin (gönderen adresi) mini analitiği: toplam, ekli sayısı, ilk/son tarih.
+    public func senderStats(address: String) throws -> SenderDetail {
+        let key = address.lowercased()
+        return try dbQueue.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN attachments IS NOT NULL AND attachments <> '' THEN 1 ELSE 0 END) AS att,
+                       MIN(date) AS first, MAX(date) AS last
+                FROM message WHERE lower(fromAddress) = ?
+                """, arguments: [key]) else {
+                return SenderDetail(total: 0, withAttachments: 0, firstDate: nil, lastDate: nil)
+            }
+            return SenderDetail(
+                total: row["total"] ?? 0,
+                withAttachments: row["att"] ?? 0,
+                firstDate: row["first"], lastDate: row["last"])
         }
     }
 

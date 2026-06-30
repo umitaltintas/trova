@@ -67,6 +67,7 @@ final class AppModel {
     var people: [SenderStat] = []
     var selectedPersonAddress: String?
     var personMails: [SearchHit] = []
+    var personDetail: SenderDetail?      // seçili kişinin mini analitiği
 
     // Sağlık / kurulum (HealthCheck girdileri)
     var llmConfigured = false
@@ -242,15 +243,19 @@ final class AppModel {
         }
     }
 
-    /// Seçilen kişinin maillerini yükler (en yeni önce) ve ilkini okuma paneline getirir.
+    /// Seçilen kişinin maillerini (en yeni önce) ve mini analitiğini yükler, ilkini okuma paneline getirir.
     func selectPerson(_ address: String) {
         selectedPersonAddress = address
+        personDetail = nil
         Task {
-            guard let mails = await background({
-                try IndexStore(path: AppPaths.databaseURL).fromSender(address, limit: 200)
+            guard let loaded = await background({ () -> (mails: [SearchHit], stats: SenderDetail) in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                return (try store.fromSender(address, limit: 200),
+                        try store.senderStats(address: address))
             }) else { return }
-            personMails = mails
-            selection = mails.first?.id
+            personMails = loaded.mails
+            personDetail = loaded.stats
+            selection = loaded.mails.first?.id
             loadSelected()
         }
     }
