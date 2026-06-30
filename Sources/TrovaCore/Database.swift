@@ -74,6 +74,7 @@ public struct SearchHit: Sendable, Identifiable {
     public var isRead: Bool? = nil       // okundu mu (bilinmiyorsa nil → rozet gösterilmez)
     public var isFlagged: Bool? = nil    // bayraklı mı (bilinmiyorsa nil → rozet gösterilmez)
     public var matchedInAttachment: Bool = false   // sonuç ek içeriği aramasından mı geldi (rozet için)
+    public var isPinned: Bool? = nil     // Trova-yerel yıldızlı mı (bilinmiyorsa nil → app pinnedIDs ile işaretler)
 }
 
 /// En çok yazışılan bir kişinin özeti ("Kişiler" görünümü için).
@@ -163,18 +164,21 @@ public struct SearchFilter: Sendable, Equatable {
     public var attachmentKind: AttachmentKind?  // yalnızca belirli türde eki olan mailler (has:pdf gibi; nil → etkisiz)
     public var unreadOnly: Bool           // yalnızca okunmamış mailler (isRead = 0)
     public var flaggedOnly: Bool          // yalnızca bayraklı mailler (isFlagged = 1)
+    public var pinnedOnly: Bool           // yalnızca Trova-yerel yıldızlı (pinned) mailler
     public init(accountID: String? = nil, since: Date? = nil, until: Date? = nil,
                 fromContains: String? = nil, hasAttachment: Bool = false,
                 attachmentKind: AttachmentKind? = nil,
-                unreadOnly: Bool = false, flaggedOnly: Bool = false) {
+                unreadOnly: Bool = false, flaggedOnly: Bool = false,
+                pinnedOnly: Bool = false) {
         self.accountID = accountID; self.since = since; self.until = until
         self.fromContains = fromContains; self.hasAttachment = hasAttachment
         self.attachmentKind = attachmentKind
         self.unreadOnly = unreadOnly; self.flaggedOnly = flaggedOnly
+        self.pinnedOnly = pinnedOnly
     }
     public var isEmpty: Bool {
         accountID == nil && since == nil && until == nil && fromContains == nil
-            && !hasAttachment && attachmentKind == nil && !unreadOnly && !flaggedOnly
+            && !hasAttachment && attachmentKind == nil && !unreadOnly && !flaggedOnly && !pinnedOnly
     }
 }
 
@@ -447,6 +451,20 @@ public final class IndexStore: Sendable {
             try db.create(table: "dismissed_digest") { t in
                 t.primaryKey("threadKey", .text)
                 t.column("dismissedAt", .text).notNull()
+            }
+        }
+
+        // Faz 14: Trova-yerel "Yıldızlı" (pin) koleksiyonu. iter 21 Apple Mail bayrakları
+        // (isRead/isFlagged) SALT-OKUNUR ve .emlx'ten çözülür; bu FARKLIDIR — kullanıcı Trova
+        // İÇİNDE herhangi bir maili yıldızlar (Apple Mail'e YAZMADAN). Anahtar mesajın kararlı
+        // id'sidir (message.id = dosya yolunun SHA256'sı). Sütun adı mevcut adlandırmayla
+        // (dismissed_digest/attachment.messageID) tutarlı olsun diye "messageID" ama DEĞERİ
+        // message.id'dir — RFC822 Message-ID DEĞİL. `pinnedAt` ISO-8601 metin saklanır.
+        // Additive: yalnız yeni tablo eklenir; mevcut `message` verisi/şeması korunur.
+        migrator.registerMigration("v14_pinned") { db in
+            try db.create(table: "pinned") { t in
+                t.primaryKey("messageID", .text)   // DEĞER = message.id (path-hash), RFC822 Message-ID DEĞİL
+                t.column("pinnedAt", .text).notNull()
             }
         }
         return migrator
@@ -1268,6 +1286,11 @@ public final class IndexStore: Sendable {
         }
         if filter.unreadOnly { parts.append("m.isRead = 0") }
         if filter.flaggedOnly { parts.append("m.isFlagged = 1") }
+        // Trova-yerel yıldızlı (pinned) süzgeci: `pinned` tablosunda kaydı olan mailler
+        // (anahtar = message.id). unreadOnly/flaggedOnly desenini izler.
+        if filter.pinnedOnly {
+            parts.append("EXISTS (SELECT 1 FROM pinned p WHERE p.messageID = m.id)")
+        }
         return (parts.isEmpty ? "" : " AND " + parts.joined(separator: " AND "), args)
     }
 
@@ -1548,5 +1571,54 @@ extension IndexStore {
     /// Tüm görmezden gelme kayıtlarını siler ("Gizlenenleri geri al").
     public func clearDismissedDigest() throws {
         try dbQueue.write { db in try db.execute(sql: "DELETE FROM dismissed_digest") }
+    }
+}
+
+// MARK: - Trova-yerel yıldızlı (pin) koleksiyonu (Faz 14)
+
+extension IndexStore {
+    /// Bir maili Trova İÇİNDE yıldızlar (pin) — Apple Mail'e YAZMAZ. Anahtar mesajın kararlı
+    /// id'sidir (`message.id` = path-hash), RFC822 Message-ID DEĞİL. Aynı id zaten yıldızlıysa
+    /// `pinnedAt` güncellenir (idempotent upsert). Boş/yalnız boşluk id atlanır.
+    public func pin(id: String, at date: Date = Date()) throws {
+        let key = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        let stamp = ISO8601DateFormatter().string(from: date)
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO pinned (messageID, pinnedAt) VALUES (?, ?)
+                ON CONFLICT(messageID) DO UPDATE SET pinnedAt = excluded.pinnedAt
+                """, arguments: [key, stamp])
+        }
+    }
+
+    /// Bir mailin yıldızını kaldırır (yıldızlı değilse etkisiz).
+    public func unpin(id: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM pinned WHERE messageID = ?", arguments: [id])
+        }
+    }
+
+    /// Bir mailin Trova-yerel yıldızlı olup olmadığını döndürür.
+    public func isPinned(id: String) throws -> Bool {
+        try dbQueue.read { db in
+            try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM pinned WHERE messageID = ?)",
+                              arguments: [id]) ?? false
+        }
+    }
+
+    /// Tüm yıldızlı mail id'lerini (`message.id`) küme olarak döndürür — sonuç satırlarını
+    /// işaretlemek (yıldız rozeti) ve `isSelectedPinned` için.
+    public func pinnedIDs() throws -> Set<String> {
+        try dbQueue.read { db in
+            Set(try String.fetchAll(db, sql: "SELECT messageID FROM pinned"))
+        }
+    }
+
+    /// Yıldızlı (pinned) mail sayısı.
+    public func pinnedCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM pinned") ?? 0
+        }
     }
 }

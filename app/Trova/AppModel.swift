@@ -154,6 +154,11 @@ final class AppModel {
     var dateRange: DateRange = .all
     var unreadOnly = false          // yalnızca okunmamış mailler
     var flaggedOnly = false         // yalnızca bayraklı mailler
+    var pinnedOnly = false          // yalnızca Trova-yerel yıldızlı (pinned) mailler
+
+    // Trova-yerel yıldızlı (pin) koleksiyonu: gösterim için yüklenen id kümesi (message.id).
+    // Sonuç satırı yıldız rozeti + ReadingPane "Yıldızla/Yıldızı kaldır" toggle'ı bunu izler.
+    var pinnedIDs: Set<String> = []
 
     // Kayıtlı aramalar
     var savedSearches: [SavedSearch] = []
@@ -244,6 +249,12 @@ final class AppModel {
             ?? find(personMails)
             ?? find(similarMails)
             ?? find(conversation.flatMap(\.cited))
+    }
+
+    /// Seçili mail Trova-yerel yıldızlı mı (ReadingPane "Yıldızla/Yıldızı kaldır" toggle'ı için).
+    var isSelectedPinned: Bool {
+        guard let id = selection else { return false }
+        return pinnedIDs.contains(id)
     }
 
     /// Açık bölüme göre klavyeyle gezinilebilir aktif mail id listesi (görünen sırayla).
@@ -437,7 +448,7 @@ final class AppModel {
         case .search:
             // Yalnız anlamlı bir sorgu/filtre varsa mevcut aramayı sessizce yeniden çalıştır.
             let hasQuery = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if hasQuery || unreadOnly || flaggedOnly { runSearch() }
+            if hasQuery || unreadOnly || flaggedOnly || pinnedOnly { runSearch() }
         case .digest:
             loadTriage()              // triyaj listeleri (LLM brifingine dokunmadan)
         case .insights:
@@ -562,6 +573,7 @@ final class AppModel {
         loadSavedSearches()
         loadInsights()
         loadAttachments()
+        loadPinned()
     }
 
     /// Ekler görünümünü tazeler: mevcut ad araması + kategori filtresine uyan ekleri ve
@@ -782,6 +794,32 @@ final class AppModel {
         }
     }
 
+    /// Yıldızlı (pinned) mail id kümesini arka planda tazeler (sonuç satırı yıldız rozeti + filtre).
+    func loadPinned() {
+        Task {
+            guard let ids = await background({
+                try IndexStore(path: AppPaths.databaseURL).pinnedIDs()
+            }) else { return }
+            pinnedIDs = ids
+        }
+    }
+
+    /// Bir mailin Trova-yerel yıldızını açar/kapatır (Apple Mail'e YAZMAZ; anahtar `message.id`).
+    /// Optimistik: yerel kümeyi hemen günceller, sonra kalıcılaştırır. "Yalnız yıldızlı" süzgeci
+    /// açıkken arama listesini tazeler ki yıldızı kaldırılan mail listeden düşsün.
+    func togglePin(id: String) {
+        let willPin = !pinnedIDs.contains(id)
+        if willPin { pinnedIDs.insert(id) } else { pinnedIDs.remove(id) }
+        let now = Date()
+        Task {
+            _ = await background {
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                if willPin { try store.pin(id: id, at: now) } else { try store.unpin(id: id) }
+            }
+            if pinnedOnly && section == .search { runSearch() }
+        }
+    }
+
     /// Tüm görmezden gelme kayıtlarını siler ve triyaj listelerini yeniden yükler ("Gizlenenleri geri al").
     func restoreDismissedDigest() {
         Task {
@@ -935,8 +973,8 @@ final class AppModel {
         let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
         // Yeni arama: eski gönderen daraltması yeni sonuçlara yapışmasın diye sıfırla.
         activeSenderFilter = nil
-        // Arama metni yoksa bile aktif bir filtre çipi (okunmadı/bayraklı) varsa browse'a izin ver.
-        guard !raw.isEmpty || unreadOnly || flaggedOnly else {
+        // Arama metni yoksa bile aktif bir filtre çipi (okunmadı/bayraklı/yıldızlı) varsa browse'a izin ver.
+        guard !raw.isEmpty || unreadOnly || flaggedOnly || pinnedOnly else {
             results = []; selection = nil; highlightTerms = []; return
         }
         // Önce Gmail-tarzı operatörleri (from:/has:attachment), sonra Türkçe tarih ifadesini ayrıştır.
@@ -958,7 +996,7 @@ final class AppModel {
             accountID: filterAccount.isEmpty ? nil : filterAccount, since: since, until: until,
             fromContains: ops.fromContains, hasAttachment: ops.hasAttachment,
             attachmentKind: ops.attachmentKind,
-            unreadOnly: unreadOnly, flaggedOnly: flaggedOnly)
+            unreadOnly: unreadOnly, flaggedOnly: flaggedOnly, pinnedOnly: pinnedOnly)
         // PRF (sorgu genişletme) ayarı: açıksa ilk sonuçlardan terim çıkarıp sorguya eklenir.
         let prf = UserDefaults.standard.bool(forKey: SettingsKeys.queryExpansion)
         // Opt-in: ek içeriği aramaya katılsın mı (varsayılan KAPALI → hiç sorgu çalışmaz).

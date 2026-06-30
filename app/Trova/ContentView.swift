@@ -386,6 +386,10 @@ private struct SearchColumn: View {
                                  isOn: model.flaggedOnly) {
                     model.flaggedOnly.toggle(); model.runSearch()
                 }
+                FilterToggleChip(text: "Yıldızlı", systemImage: "star.fill",
+                                 isOn: model.pinnedOnly) {
+                    model.pinnedOnly.toggle(); model.runSearch()
+                }
                 Spacer()
             }
             .padding(.horizontal, 14).padding(.top, 8)
@@ -423,7 +427,7 @@ private struct SearchColumn: View {
                 EmptyStateView(content: EmptyStates.search(
                     hasIndex: model.totalCount > 0,
                     hasQuery: !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                    hasFilters: model.unreadOnly || model.flaggedOnly
+                    hasFilters: model.unreadOnly || model.flaggedOnly || model.pinnedOnly
                               || !model.filterAccount.isEmpty || model.dateRange != .all),
                     action: { model.runIndex() })
             } else {
@@ -619,6 +623,10 @@ private struct ResultRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     MessageBadges(isRead: hit.isRead, isFlagged: hit.isFlagged)
+                    if model.pinnedIDs.contains(hit.id) {
+                        Image(systemName: "star.fill").font(.system(size: 10))
+                            .foregroundStyle(Theme.amber).help("Yıldızlı")
+                    }
                     if !hit.attachments.isEmpty {
                         Image(systemName: "paperclip").font(.system(size: 10)).foregroundStyle(Theme.muted)
                     }
@@ -1570,6 +1578,16 @@ private struct ReadingPane: View {
                         .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
                         .disabled(MailLink.appleMailURL(messageID: model.selectedMessageID) == nil)
                         .help("Bu maili Apple Mail.app'te aç (yanıtlamak/işlem yapmak için)")
+                        // Trova-yerel yıldızla/yıldızı kaldır (Apple Mail'e YAZMAZ; anahtar message.id).
+                        let pinned = model.pinnedIDs.contains(hit.id)
+                        Button { model.togglePin(id: hit.id) } label: {
+                            Label(pinned ? "Yıldızı kaldır" : "Yıldızla",
+                                  systemImage: pinned ? "star.fill" : "star")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .tint(pinned ? Theme.amber : Theme.accent)
+                        .help(pinned ? "Bu mailin Trova-yerel yıldızını kaldır"
+                                     : "Bu maili Trova içinde yıldızla (Apple Mail'e yazmaz)")
                         Button { model.loadSimilar(messageID: hit.id) } label: {
                             Label("Benzer mailler", systemImage: "square.stack.3d.up")
                         }
