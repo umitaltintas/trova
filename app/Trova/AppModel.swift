@@ -157,8 +157,9 @@ final class AppModel {
     var memories: [Memory] = []                  // hafıza görüntüleyici listesi
 
     // Bugün (proaktif asistan — triyaj + günlük brifing)
-    var needsReply: [SearchHit] = []     // yanıt gerekiyor: karşı taraf en son yazdı
-    var waitingOn: [SearchHit] = []      // yanıt bekliyor: sen en son yazdın, yanıt yok
+    var needsReply: [SearchHit] = []     // yanıt gerekiyor: karşı taraf en son yazdı (gizlenenler süzülmüş)
+    var waitingOn: [SearchHit] = []      // yanıt bekliyor: sen en son yazdın, yanıt yok (gizlenenler süzülmüş)
+    var dismissedHiddenCount = 0         // şu an triyaj listelerinden GİZLENEN (görmezden gelinen) öğe sayısı
     var digestText = ""
     var isDigesting = false
 
@@ -635,16 +636,49 @@ final class AppModel {
         }
     }
 
-    /// Triyaj listelerini (yanıt gerekiyor / yanıt bekliyor) arka planda tazeler.
+    /// Triyaj listelerini (yanıt gerekiyor / yanıt bekliyor) arka planda tazeler ve görmezden
+    /// gelinen (dismissed) öğeleri süzer. Gizlenen öğe sayısı `dismissedHiddenCount`'a yazılır;
+    /// re-surface: bir öğenin tarihi gizleme anından sonraysa (konuya yeni yanıt) yeniden görünür.
     func loadTriage() {
         Task {
-            guard let lists = await background({ () -> (needs: [SearchHit], waiting: [SearchHit]) in
+            guard let lists = await background({ () -> (needs: [SearchHit], waiting: [SearchHit], dismissed: [String: Date]) in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 return (try store.needsReply(limit: 50),
-                        try store.waitingOnReply(minDays: 3, limit: 50))
+                        try store.waitingOnReply(minDays: 3, limit: 50),
+                        try store.dismissedDigest())
             }) else { return }
-            needsReply = lists.needs
-            waitingOn = lists.waiting
+            let needs = filterDismissed(lists.needs, dismissed: lists.dismissed)
+            let waiting = filterDismissed(lists.waiting, dismissed: lists.dismissed)
+            dismissedHiddenCount = (lists.needs.count - needs.count) + (lists.waiting.count - waiting.count)
+            needsReply = needs
+            waitingOn = waiting
+        }
+    }
+
+    /// Bir triyaj öğesini görmezden gelir: şimdiyle dismiss eder, listeden hemen çıkarır (optimistik)
+    /// ve kalıcılaştırır. Aynı konuya yeni yanıt gelirse öğe sonraki `loadTriage`'da tekrar görünür.
+    func dismissDigestItem(_ hit: SearchHit) {
+        let key = digestDismissKey(hit)
+        let countBefore = needsReply.count + waitingOn.count
+        needsReply.removeAll { digestDismissKey($0) == key }
+        waitingOn.removeAll { digestDismissKey($0) == key }
+        let removed = countBefore - (needsReply.count + waitingOn.count)
+        guard removed > 0 else { return }   // öğe zaten listede değil → işlem yok
+        dismissedHiddenCount += removed
+        let now = Date()
+        Task {
+            _ = await background {
+                try IndexStore(path: AppPaths.databaseURL).dismissDigest(threadKey: key, at: now)
+            }
+        }
+    }
+
+    /// Tüm görmezden gelme kayıtlarını siler ve triyaj listelerini yeniden yükler ("Gizlenenleri geri al").
+    func restoreDismissedDigest() {
+        Task {
+            _ = await background { try IndexStore(path: AppPaths.databaseURL).clearDismissedDigest() }
+            dismissedHiddenCount = 0
+            loadTriage()
         }
     }
 

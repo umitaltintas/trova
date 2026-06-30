@@ -417,6 +417,18 @@ public final class IndexStore: Sendable {
             try db.execute(sql:
                 "CREATE INDEX IF NOT EXISTS idx_message_messageID ON message(messageID)")
         }
+
+        // Faz 13: digest (Bugün) öğelerini "Görmezden gel". Kullanıcının hallettiği "yanıt
+        // gerekiyor/bekliyor" öğeleri brifingden düşürülür; KONUYA YENİ yanıt gelirse (öğenin
+        // tarihi `dismissedAt`'tan sonraysa) tekrar görünür. Anahtar thread'tir (`threadKey`;
+        // yoksa mailin kendi id'si). `dismissedAt` ISO-8601 metin olarak saklanır. Additive:
+        // yalnız yeni tablo eklenir; mevcut `message` verisi/şeması korunur.
+        migrator.registerMigration("v13_dismissed_digest") { db in
+            try db.create(table: "dismissed_digest") { t in
+                t.primaryKey("threadKey", .text)
+                t.column("dismissedAt", .text).notNull()
+            }
+        }
         return migrator
     }
 
@@ -1418,5 +1430,52 @@ extension IndexStore {
                 WHERE attachments IS NOT NULL AND attachments <> ''
                 """).map { (id: $0["id"], filePath: $0["filePath"]) }
         }
+    }
+}
+
+// MARK: - Görmezden gelinen digest öğeleri (Faz 13)
+
+extension IndexStore {
+    /// Bir digest öğesini (thread) görmezden gelinmiş olarak işaretler (upsert): aynı `threadKey`
+    /// zaten varsa `dismissedAt` yeni ana güncellenir. `dismissedAt` ISO-8601 metin saklanır.
+    /// Boş/yalnız boşluk anahtar atlanır. Re-surface mantığı tarih karşılaştırmasıyla yapılır.
+    public func dismissDigest(threadKey: String, at date: Date) throws {
+        let key = threadKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        let stamp = ISO8601DateFormatter().string(from: date)
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO dismissed_digest (threadKey, dismissedAt) VALUES (?, ?)
+                ON CONFLICT(threadKey) DO UPDATE SET dismissedAt = excluded.dismissedAt
+                """, arguments: [key, stamp])
+        }
+    }
+
+    /// Bir thread'in görmezden gelinme kaydını kaldırır (tekrar görünür kılar).
+    public func undismissDigest(threadKey: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM dismissed_digest WHERE threadKey = ?", arguments: [threadKey])
+        }
+    }
+
+    /// Tüm görmezden gelinen thread'leri `threadKey → dismissedAt` haritası olarak döndürür.
+    /// Çözülemeyen (bozuk) tarih kayıtları atlanır.
+    public func dismissedDigest() throws -> [String: Date] {
+        let iso = ISO8601DateFormatter()
+        return try dbQueue.read { db in
+            var map: [String: Date] = [:]
+            for row in try Row.fetchAll(db, sql: "SELECT threadKey, dismissedAt FROM dismissed_digest") {
+                let key: String = row["threadKey"]
+                if let stamp: String = row["dismissedAt"], let date = iso.date(from: stamp) {
+                    map[key] = date
+                }
+            }
+            return map
+        }
+    }
+
+    /// Tüm görmezden gelme kayıtlarını siler ("Gizlenenleri geri al").
+    public func clearDismissedDigest() throws {
+        try dbQueue.write { db in try db.execute(sql: "DELETE FROM dismissed_digest") }
     }
 }

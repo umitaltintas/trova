@@ -1249,11 +1249,16 @@ private struct DigestColumn: View {
                                   icon: "hourglass",
                                   hits: model.waitingOn)
                 }
+                // Görmezden gelinen öğe varsa: sayı + "Gizlenenleri geri al".
+                if model.dismissedHiddenCount > 0 {
+                    DismissedFooter()
+                }
                 if model.isDigesting && model.needsReply.isEmpty && model.waitingOn.isEmpty
                     && model.digestText.isEmpty {
                     // Brifing hazırlanırken spinner yerine iskelet satırlar.
                     SkeletonList(rows: 3).frame(minHeight: 180)
-                } else if isEmpty && !model.isDigesting {
+                } else if isEmpty && !model.isDigesting && model.dismissedHiddenCount == 0 {
+                    // Yalnız gerçekten boşken (gizlenmiş öğe yokken) "her şey güncel" mesajı.
                     EmptyStateView(content: EmptyStates.digest(
                         hasNeedsReply: !model.needsReply.isEmpty,
                         hasWaiting: !model.waitingOn.isEmpty))
@@ -1330,9 +1335,9 @@ private struct TriageSection: View {
                 .foregroundStyle(Theme.faint).tracking(0.5)
             VStack(spacing: 6) {
                 ForEach(hits) { hit in
-                    TriageRow(hit: hit, selected: hit.id == model.selection) {
-                        model.selection = hit.id; model.loadSelected()
-                    }
+                    TriageRow(hit: hit, selected: hit.id == model.selection,
+                              action: { model.selection = hit.id; model.loadSelected() },
+                              onDismiss: { model.dismissDigestItem(hit) })
                 }
             }
         }
@@ -1343,6 +1348,8 @@ private struct TriageRow: View {
     let hit: SearchHit
     let selected: Bool
     let action: () -> Void
+    let onDismiss: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -1367,6 +1374,49 @@ private struct TriageRow: View {
                 .stroke(selected ? Theme.accent.opacity(0.5) : Theme.line, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        // "Görmezden gel": hover'da beliren küçük × (sağ üst köşe) + sağ tık menüsü.
+        .overlay(alignment: .topTrailing) {
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.muted)
+                    .background(Circle().fill(Theme.card).padding(1))
+            }
+            .buttonStyle(.plain)
+            .help("Görmezden gel (yeni yanıt gelirse tekrar görünür)")
+            .accessibilityLabel("Görmezden gel")
+            .opacity(hovering ? 1 : 0)
+            .padding(5)
+        }
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button { onDismiss() } label: {
+                Label("Görmezden gel", systemImage: "eye.slash")
+            }
+        }
+    }
+}
+
+/// Görmezden gelinen öğe sayısını gösterir ve hepsini geri almayı sağlar.
+private struct DismissedFooter: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "eye.slash").font(.system(size: 11)).foregroundStyle(Theme.faint)
+            Text("\(model.dismissedHiddenCount) öğe gizlendi")
+                .font(.system(size: 11)).foregroundStyle(Theme.muted)
+            Spacer()
+            Button { model.restoreDismissedDigest() } label: {
+                Label("Gizlenenleri geri al", systemImage: "arrow.uturn.backward")
+                    .font(.rounded(11, .semibold)).foregroundStyle(Theme.accent)
+            }
+            .buttonStyle(.plain)
+            .help("Görmezden gelinen tüm öğeleri tekrar göster")
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusSmall))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.line, lineWidth: 1))
     }
 }
 
