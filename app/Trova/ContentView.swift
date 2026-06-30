@@ -404,6 +404,15 @@ private struct SearchColumn: View {
                               || !model.filterAccount.isEmpty || model.dateRange != .all),
                     action: { model.runIndex() })
             } else {
+                // Sonuç sayısı + listeyi Markdown'a dışa aktarma (yalnız sonuç varken).
+                HStack(spacing: 8) {
+                    Text("\(model.results.count) sonuç").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                    Spacer()
+                    ListExportMenu(markdown: { model.exportSearchResults() },
+                                   filename: model.query.isEmpty ? "Arama sonuçları" : "Arama \(model.query)",
+                                   labelText: "Sonuçları dışa aktar")
+                }
+                .padding(.horizontal, 14).padding(.vertical, 8)
                 List(selection: $model.selection) {
                     ForEach(model.results) { hit in
                         ResultRow(hit: hit, terms: model.highlightTerms)
@@ -844,6 +853,33 @@ private struct ExportBar: View {
     }
 }
 
+/// Bir mail listesini (arama sonuçları / kişi mailleri / benzer mailler) Markdown'a
+/// kopyalama veya .md kaydetme için kompakt menü. Dar başlıklarda taşmaması için tek düğmedir.
+private struct ListExportMenu: View {
+    let markdown: () -> String
+    let filename: String
+    var labelText = "Dışa aktar"
+    @State private var copied = false
+
+    var body: some View {
+        Menu {
+            Button {
+                Exporter.copy(markdown()); copied = true
+            } label: { Label("Markdown kopyala", systemImage: "doc.on.doc") }
+            Button {
+                Exporter.save(markdown(), suggestedName: filename)
+            } label: { Label(".md kaydet", systemImage: "square.and.arrow.down") }
+        } label: {
+            Label(copied ? "Kopyalandı" : labelText,
+                  systemImage: copied ? "checkmark" : "square.and.arrow.up")
+                .font(.system(size: 11))
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .foregroundStyle(Theme.accent)
+        .help("Listeyi Markdown olarak dışa aktar")
+    }
+}
+
 /// Ajanın adım adım ne yaptığını gösteren canlı iz.
 private struct AgentTrace: View {
     let steps: [AgentStep]
@@ -1074,6 +1110,10 @@ private struct PersonDetailHeader: View {
                     }
                 }
                 Spacer()
+                if !model.personMails.isEmpty {
+                    ListExportMenu(markdown: { model.exportPersonMails() },
+                                   filename: person?.name ?? address)
+                }
                 Button { model.composeNew(to: address) } label: {
                     Label("Yeni e-posta", systemImage: "square.and.pencil")
                 }
@@ -1440,6 +1480,9 @@ private struct SimilarMailsSheet: View {
                     }
                 }
                 Spacer()
+                if !model.isLoadingSimilar && !model.similarMails.isEmpty {
+                    ListExportMenu(markdown: { model.exportSimilar() }, filename: "Benzer mailler")
+                }
                 Button { model.showSimilarSheet = false } label: {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundStyle(Theme.muted)
                 }

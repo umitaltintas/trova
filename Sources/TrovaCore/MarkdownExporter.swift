@@ -21,6 +21,19 @@ public struct DigestItem: Equatable, Sendable {
     }
 }
 
+/// Dışa aktarılacak bir mail listesi maddesi (gönderen + konu + tarih etiketi + opsiyonel kutu).
+/// Arama sonuçları, bir kişinin mailleri ve "Benzer mailler" listeleri için ortak madde tipi.
+/// `mailbox` nil (veya boş) ise dışa aktarımda kutu bölümü ( · <kutu>) gösterilmez.
+public struct ExportedListItem: Equatable, Sendable {
+    public let from: String
+    public let subject: String
+    public let dateLabel: String
+    public let mailbox: String?
+    public init(from: String, subject: String, dateLabel: String, mailbox: String? = nil) {
+        self.from = from; self.subject = subject; self.dateLabel = dateLabel; self.mailbox = mailbox
+    }
+}
+
 /// Arama/AI çıktısını paylaşılabilir Markdown metnine dönüştürür (panoya kopyalama veya .md kaydı için).
 /// Saf metin üretimi — yan etkisiz, test edilebilir.
 public enum MarkdownExporter {
@@ -89,6 +102,18 @@ public enum MarkdownExporter {
         return out
     }
 
+    /// Bir mail listesini (arama sonuçları / kişi mailleri / benzer mailler) başlık + madde sayısı +
+    /// maddelere döker. Her madde: `- **<gönderen>** — <konu>` ardından alt satırda tarih etiketi
+    /// (kutu varsa ` · <kutu>`). Liste boşsa başlık altına `_(kayıt yok)_` yazılır (altbilgi atlanır).
+    public static func emailList(title: String, items: [ExportedListItem]) -> String {
+        let heading = trimmedOrPlaceholder(title, "Liste")
+        guard !items.isEmpty else { return "# \(heading)\n\n_(kayıt yok)_\n" }
+        var out = "# \(heading)\n\n_\(items.count) kayıt_\n\n"
+        out += items.map(listLine).joined(separator: "\n\n")
+        out += "\n\n---\n_Trova ile dışa aktarıldı_\n"
+        return out
+    }
+
     // MARK: - Yardımcılar
 
     /// Bir triyaj bölümünü başlık + maddelerle yazar; liste boşsa `_(yok)_` koyar.
@@ -105,6 +130,17 @@ public enum MarkdownExporter {
         var line = "**\(inlineClean(item.from))** — \(inlineClean(item.subject))"
         let age = item.ageLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         if !age.isEmpty { line += " _(\(age))_" }
+        return line
+    }
+
+    /// Tek bir mail listesi maddesini iki satıra döker: `- **<gönderen>** — <konu>` (markdown sert
+    /// satır sonu) ardından girintili tarih etiketi; kutu varsa ` · <kutu>` eklenir. Boş kutu atlanır.
+    private static func listLine(_ item: ExportedListItem) -> String {
+        var line = "- **\(inlineClean(item.from))** — \(inlineClean(item.subject))  \n  \(inlineClean(item.dateLabel))"
+        if let mailbox = item.mailbox {
+            let clean = inlineClean(mailbox)
+            if !clean.isEmpty { line += " · \(clean)" }
+        }
         return line
     }
 

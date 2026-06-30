@@ -122,4 +122,47 @@ final class MarkdownExporterTests: XCTestCase {
         XCTAssertTrue(md.hasPrefix("# Bugün — Test\n"))
         XCTAssertFalse(md.contains("\n\n\n"))   // boş brifing fazladan boşluk bırakmaz
     }
+
+    // MARK: - Mail listesi (emailList)
+
+    func testEmailListWithItems() {
+        let items = [
+            ExportedListItem(from: "Ali", subject: "Fatura", dateLabel: "2g", mailbox: "INBOX"),
+            ExportedListItem(from: "Veli", subject: "Teklif", dateLabel: "5g", mailbox: "Arşiv"),
+        ]
+        let md = MarkdownExporter.emailList(title: "Arama: fatura", items: items)
+        XCTAssertTrue(md.hasPrefix("# Arama: fatura\n"))
+        XCTAssertTrue(md.contains("_2 kayıt_"))
+        XCTAssertTrue(md.contains("- **Ali** — Fatura  \n  2g · INBOX"))
+        XCTAssertTrue(md.contains("- **Veli** — Teklif  \n  5g · Arşiv"))
+        XCTAssertTrue(md.contains("_Trova ile dışa aktarıldı_"))
+    }
+
+    func testEmailListWithoutMailboxOmitsSeparator() {
+        let items = [ExportedListItem(from: "Ali", subject: "Fatura", dateLabel: "2g", mailbox: nil)]
+        let md = MarkdownExporter.emailList(title: "Benzer mailler", items: items)
+        XCTAssertTrue(md.contains("- **Ali** — Fatura  \n  2g"))
+        XCTAssertFalse(md.contains(" · "))   // kutu yoksa ayraç yok
+    }
+
+    func testEmailListEmptyShowsPlaceholder() {
+        let md = MarkdownExporter.emailList(title: "Arama sonuçları", items: [])
+        XCTAssertTrue(md.hasPrefix("# Arama sonuçları\n"))
+        XCTAssertTrue(md.contains("_(kayıt yok)_"))
+        XCTAssertFalse(md.contains("- **"))   // madde üretilmez
+    }
+
+    func testEmailListCountReflectsItemCount() {
+        let items = [ExportedListItem(from: "Ali", subject: "Fatura", dateLabel: "2g", mailbox: "INBOX")]
+        let md = MarkdownExporter.emailList(title: "X", items: items)
+        XCTAssertTrue(md.contains("_1 kayıt_"))
+    }
+
+    func testEmailListCleansNewlinesAndKeepsDiacritics() {
+        let items = [ExportedListItem(from: "Ali\nVeli", subject: "Çok\nsatırlı şğüöçı",
+                                      dateLabel: "dün", mailbox: "Gönderilenler")]
+        let md = MarkdownExporter.emailList(title: "İş: çağrı", items: items)
+        XCTAssertTrue(md.hasPrefix("# İş: çağrı\n"))
+        XCTAssertTrue(md.contains("- **Ali Veli** — Çok satırlı şğüöçı  \n  dün · Gönderilenler"))
+    }
 }

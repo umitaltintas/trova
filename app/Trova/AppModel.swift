@@ -235,6 +235,39 @@ final class AppModel {
                                        needsReply: items(needsReply), waitingOn: items(waitingOn))
     }
 
+    /// Bir mail listesini dışa aktarılabilir maddelere çevirir (gönderen + konu + göreli tarih + kutu).
+    /// Tarih yoksa etiket boş bırakılır; kutu her zaman doldurulur (MarkdownExporter boşsa atlar).
+    private func listItems(_ hits: [SearchHit]) -> [ExportedListItem] {
+        let now = Date()
+        return hits.map { hit in
+            ExportedListItem(
+                from: hit.fromName ?? hit.fromAddress ?? "Bilinmeyen gönderen",
+                subject: hit.subject ?? "(konu yok)",
+                dateLabel: hit.date.map { RelativeTime.short($0, now: now) } ?? "",
+                mailbox: hit.mailbox)
+        }
+    }
+
+    /// Arama sonuçlarını Markdown listesine döker. Başlık: sorgu varsa "Arama: <sorgu>", yoksa "Arama sonuçları".
+    func exportSearchResults() -> String {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = q.isEmpty ? "Arama sonuçları" : "Arama: \(q)"
+        return MarkdownExporter.emailList(title: title, items: listItems(results))
+    }
+
+    /// Seçili kişinin maillerini Markdown listesine döker. Başlık: kişinin adı (yoksa adresi).
+    func exportPersonMails() -> String {
+        let address = selectedPersonAddress ?? ""
+        let name = people.first { $0.address == address }?.name
+        let title = name ?? (address.isEmpty ? "Kişi mailleri" : address)
+        return MarkdownExporter.emailList(title: title, items: listItems(personMails))
+    }
+
+    /// "Benzer mailler" listesini Markdown'a döker.
+    func exportSimilar() -> String {
+        MarkdownExporter.emailList(title: "Benzer mailler", items: listItems(similarMails))
+    }
+
     func cancelJob() {
         cancelFlag?.cancel()
         currentTask?.cancel()
