@@ -51,6 +51,7 @@ enum SettingsKeys {
     static let diversify = "diversify"            // Sonuçları thread bazında çeşitlendir (varsayılan açık)
     static let queryExpansion = "queryExpansion"  // PRF sorgu genişletme (varsayılan kapalı)
     static let streamAnswers = "streamAnswers"    // Sor yanıtını canlı (token token) akıt (varsayılan AÇIK)
+    static let indexAttachmentContent = "indexAttachmentContent"  // Ek İÇERİĞİNİ indeksle/ara (opt-in, varsayılan KAPALI)
     static let recentSearches = "trova.recentSearches"  // otomatik arama geçmişi ([String], en yeni başta)
 }
 

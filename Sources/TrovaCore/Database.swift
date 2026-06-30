@@ -73,6 +73,7 @@ public struct SearchHit: Sendable, Identifiable {
     public var attachments: [String] = []
     public var isRead: Bool? = nil       // okundu mu (bilinmiyorsa nil → rozet gösterilmez)
     public var isFlagged: Bool? = nil    // bayraklı mı (bilinmiyorsa nil → rozet gösterilmez)
+    public var matchedInAttachment: Bool = false   // sonuç ek içeriği aramasından mı geldi (rozet için)
 }
 
 /// En çok yazışılan bir kişinin özeti ("Kişiler" görünümü için).
@@ -351,6 +352,20 @@ public final class IndexStore: Sendable {
             }
             try db.create(index: "idx_attachment_message", on: "attachment", columns: ["messageID"])
             try db.create(index: "idx_attachment_ext", on: "attachment", columns: ["ext"])
+        }
+
+        // Faz 11: ek içeriği araması (opt-in, varsayılan KAPALI) — eklerin İÇİNDEKİ metni
+        // aranabilir kılan AYRI FTS5 tablosu. Additive: mevcut `message_fts` ve tetikleyicileri
+        // YENİDEN KURULMAZ, mevcut tablolar/veri korunur; yalnız yeni sanal tablo eklenir.
+        // Satırlar tetikleyiciyle değil, `replaceAttachmentContent`/backfill geçişiyle ELLE yazılır.
+        // Tokenizer message_fts ile aynı (unicode61) → Türkçe ön ek/eşleşme davranışı tutarlı.
+        // `messageID` UNINDEXED: yalnız saklanır (sahip mesajın kararlı id'si), aranmaz.
+        migrator.registerMigration("v11_attachment_content") { db in
+            try db.create(virtualTable: "attachment_content", using: FTS5()) { t in
+                t.column("content")
+                t.column("messageID").notIndexed()
+                t.tokenizer = .unicode61()
+            }
         }
         return migrator
     }
@@ -1083,6 +1098,71 @@ extension IndexStore {
             var map: [String: SearchHit] = [:]
             for row in rows { map[row["id"]] = Self.hit(from: row) }
             return map
+        }
+    }
+}
+
+// MARK: - Ek içeriği araması (Faz 11, opt-in)
+
+extension IndexStore {
+    /// Bir mesajın ek içeriğini (eklerden çıkarılan ucuz metin) idempotent yeniden yazar:
+    /// önce o `messageID`'nin satırlarını siler, sonra (boş değilse) tek satır ekler.
+    /// `messageID` sahip mesajın kararlı id'sidir (message.id) — RFC822 Message-ID değil.
+    public func replaceAttachmentContent(messageID: String, text: String) throws {
+        try replaceAttachmentContents([(messageID, text)])
+    }
+
+    /// Birden çok mesajın ek içeriğini tek yazma işleminde (transaction) idempotent yeniden yazar.
+    /// Her messageID için önce eski satır(lar) silinir, sonra boş olmayan metin tek satır eklenir.
+    public func replaceAttachmentContents(_ items: [(messageID: String, text: String)]) throws {
+        guard !items.isEmpty else { return }
+        try dbQueue.write { db in
+            for (messageID, text) in items {
+                try db.execute(sql:
+                    "DELETE FROM attachment_content WHERE messageID = ?", arguments: [messageID])
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                try db.execute(sql:
+                    "INSERT INTO attachment_content (content, messageID) VALUES (?, ?)",
+                    arguments: [trimmed, messageID])
+            }
+        }
+    }
+
+    /// Ek içeriğinde (FTS5 MATCH) sorguyla eşleşen mesaj id'lerini bm25 sırasıyla döndürür.
+    /// Mesaj FTS'iyle aynı `ftsPattern`'i (tırnaklı + ön ek `*`) kullanır → Türkçe davranış tutarlı.
+    public func messageIDsMatchingAttachmentContent(_ query: String) throws -> [String] {
+        let pattern = Self.ftsPattern(query)
+        guard !pattern.isEmpty else { return [] }
+        return try dbQueue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT messageID FROM attachment_content
+                WHERE attachment_content MATCH ?
+                ORDER BY bm25(attachment_content)
+                """, arguments: [pattern])
+        }
+    }
+
+    /// Ek içeriği FTS tablosunu tamamen boşaltır (toggle kapatılınca temizlemek için).
+    public func clearAttachmentContent() throws {
+        try dbQueue.write { db in try db.execute(sql: "DELETE FROM attachment_content") }
+    }
+
+    /// Ek içeriği indekslenmiş (içerik satırı olan) mesaj sayısı.
+    public func attachmentContentCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM attachment_content") ?? 0
+        }
+    }
+
+    /// Eki olan tüm mesajların (id, dosya yolu) listesi — ek içeriği backfill geçişi için.
+    /// `attachments` kolonu dolu (en az bir ek adı olan) mailler döner.
+    public func messagesWithAttachments() throws -> [(id: String, filePath: String)] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, filePath FROM message
+                WHERE attachments IS NOT NULL AND attachments <> ''
+                """).map { (id: $0["id"], filePath: $0["filePath"]) }
         }
     }
 }

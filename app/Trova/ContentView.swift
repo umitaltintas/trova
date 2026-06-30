@@ -556,6 +556,11 @@ private struct ResultRow: View {
                     Text(AttributedString(snippet: snippet))
                         .font(.system(size: 11)).lineLimit(2)
                 }
+                if hit.matchedInAttachment {
+                    Chip(text: "ek içeriğinde", systemImage: "doc.text.magnifyingglass")
+                        .padding(.top, 1)
+                        .help("Bu mail, bir ekin içeriğinde aranan terimle eşleşti")
+                }
                 if !matchedAttachments.isEmpty {
                     MatchedAttachmentChips(names: matchedAttachments) { name in
                         model.openAttachment(named: name, messageID: hit.id)

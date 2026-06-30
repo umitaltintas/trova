@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKeys.diversify) private var diversify = true
     @AppStorage(SettingsKeys.queryExpansion) private var queryExpansion = false
     @AppStorage(SettingsKeys.streamAnswers) private var streamAnswers = true
+    @AppStorage(SettingsKeys.indexAttachmentContent) private var indexAttachmentContent = false
 
     @Environment(AppModel.self) private var model
 
@@ -92,6 +93,49 @@ struct SettingsView: View {
             .tabItem { Label("AI (OpenRouter)", systemImage: "sparkles") }
             .padding()
             .onAppear { model.refreshStatus(); model.loadMemories() }
+
+            Form {
+                Toggle("Ek içeriğini indeksle (PDF/metin)", isOn: $indexAttachmentContent)
+                Text("Eklerin İÇİNDEKİ metni (PDF metin katmanı ve düz metin: txt, md, csv, tsv, log, rtf) "
+                   + "aranabilir kılar. Görseller ve taranmış PDF'ler (OCR) HARİÇtir — yalnız hazır "
+                   + "metin okunur. Çıkarım pahalı olabilir; bu yüzden varsayılan kapalıdır.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Divider()
+
+                Text("İndekslenen ek içeriği: \(model.attachmentContentCount) mail")
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted)
+
+                Button {
+                    model.runAttachmentContentPass()
+                } label: {
+                    Label("Ek içeriğini şimdi indeksle", systemImage: "doc.text.magnifyingglass")
+                }
+                .disabled(model.busy || !indexAttachmentContent)
+                Text("Eki olan tüm mevcut mailleri gezip içeriklerini çıkarır. Artımlı indeksleme "
+                   + "değişmemiş mailleri atladığından, açtıktan sonra bir kez çalıştırın.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Button(role: .destructive) {
+                    model.clearAttachmentContent()
+                } label: {
+                    Label("Ek içeriğini temizle", systemImage: "trash")
+                }
+                .disabled(model.busy || model.attachmentContentCount == 0)
+                Text("Toggle'ı kapattıktan sonra indekslenmiş ek içeriğini silmek için kullanın.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                if model.busy, !model.progress.isEmpty {
+                    Divider()
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(model.progress).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
+            .tabItem { Label("Ek içeriği", systemImage: "doc.text.magnifyingglass") }
+            .padding()
+            .onAppear { model.refreshStatus() }
         }
         .frame(width: 480, height: 460)
     }

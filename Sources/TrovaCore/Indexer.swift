@@ -33,6 +33,7 @@ public enum Indexer {
         root: URL,
         limit: Int? = nil,
         batchSize: Int = 500,
+        indexAttachmentContent: Bool = false,
         cancel: CancellationFlag? = nil,
         progress: ((_ processed: Int, _ total: Int) -> Void)? = nil
     ) throws -> IndexResult {
@@ -46,6 +47,8 @@ public enum Indexer {
         batch.reserveCapacity(batchSize)
         // Aynı partideki mesajların ek adları (byte çıkarmadan, yalnız parse sonucu adlar).
         var attachmentBatch: [(messageID: String, names: [String])] = []
+        // Opt-in: ek İÇERİĞİ (OCR'sız ucuz metin). KAPALIYKEN bu liste hiç doldurulmaz.
+        var contentBatch: [(messageID: String, text: String)] = []
 
         for message in messages {
             if cancel?.isCancelled == true { break }
@@ -65,7 +68,8 @@ public enum Indexer {
             }
 
             do {
-                let parsed = EMLXParser.parse(data: try Data(contentsOf: message.fileURL))
+                let data = try Data(contentsOf: message.fileURL)
+                let parsed = EMLXParser.parse(data: data)
                 let body = parsed.body
                 let normalizedSubject = EMLXParser.normalizeSubject(parsed.subject)
                 let threadKey = normalizedSubject.isEmpty ? "id:\(id)" : "s:\(normalizedSubject)"
@@ -96,6 +100,11 @@ public enum Indexer {
                     isFlagged: flags?.isFlagged))
                 // Ek adlarını ayrı tabloya yazmak üzere biriktir (mesaj satırıyla aynı partide).
                 attachmentBatch.append((messageID: id, names: parsed.attachments))
+                // Opt-in AÇIKsa ve ek varsa: eklerin İÇERİĞİNDEN ucuz metni (OCR'sız) çıkar.
+                // KAPALIYKEN bu adım tamamen atlanır → davranış birebir korunur.
+                if indexAttachmentContent, !parsed.attachments.isEmpty {
+                    contentBatch.append((messageID: id, text: attachmentContentText(from: data)))
+                }
                 result.indexed += 1
             } catch {
                 result.failed += 1
@@ -104,6 +113,10 @@ public enum Indexer {
             if batch.count >= batchSize {
                 result.inserted += try store.upsert(batch)           // önce mesaj satırları (FK)
                 try store.replaceAttachments(attachmentBatch)        // sonra ek adları (idempotent)
+                if !contentBatch.isEmpty {
+                    try store.replaceAttachmentContents(contentBatch)  // sonra ek içeriği (opt-in)
+                    contentBatch.removeAll(keepingCapacity: true)
+                }
                 batch.removeAll(keepingCapacity: true)
                 attachmentBatch.removeAll(keepingCapacity: true)
                 progress?(result.processed, total)
@@ -112,9 +125,72 @@ public enum Indexer {
         if !batch.isEmpty {
             result.inserted += try store.upsert(batch)
             try store.replaceAttachments(attachmentBatch)
+            if !contentBatch.isEmpty { try store.replaceAttachmentContents(contentBatch) }
         }
         progress?(result.processed, total)
         return result
+    }
+
+    /// Ek içeriği backfill geçişi (opt-in toggle AÇIKken kullanıcı tetikler): eki olan TÜM
+    /// mailleri gezer, eklerinden OCR'SIZ ucuz metni (PDF metin katmanı + düz metin) çıkarır ve
+    /// `attachment_content` FTS tablosuna yazar. Artımlı indeksleme (mtime-skip) yüzünden yeniden
+    /// işlenmeyen mevcut maillerin içeriğini de kapsar — bu yüzden ayrı bir geçiş gerekir.
+    /// `parserVersion`'a DOKUNMAZ (kimseyi yeniden indekslemeye zorlamaz). İptal + ilerleme destekli.
+    /// Dönüş: içerik (boş olmayan metin) yazılan mail sayısı.
+    @discardableResult
+    public static func indexAttachmentContentPass(
+        store: IndexStore,
+        batchSize: Int = 100,
+        cancel: CancellationFlag? = nil,
+        progress: ((_ processed: Int, _ total: Int) -> Void)? = nil
+    ) throws -> Int {
+        let messages = try store.messagesWithAttachments()
+        let total = messages.count
+        var processed = 0
+        var written = 0
+        var batch: [(messageID: String, text: String)] = []
+        batch.reserveCapacity(batchSize)
+
+        func flush() throws {
+            guard !batch.isEmpty else { return }
+            try store.replaceAttachmentContents(batch)
+            batch.removeAll(keepingCapacity: true)
+        }
+
+        for message in messages {
+            if cancel?.isCancelled == true { break }
+            processed += 1
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: message.filePath)) {
+                // Boş metinde de satırı yeniden yazarız (idempotent; eski içerik bayatlamasın).
+                let text = attachmentContentText(from: data)
+                batch.append((messageID: message.id, text: text))
+                if !text.isEmpty { written += 1 }
+            }
+            if batch.count >= batchSize {
+                try flush()
+                progress?(processed, total)
+            }
+        }
+        try flush()
+        progress?(processed, total)
+        return written
+    }
+
+    /// Bir mailin tüm eklerinden OCR'SIZ ucuz metni toplar (PDF metin katmanı + düz metin).
+    /// Görsel/taranmış ekler atlanır (nil). Toplam uzunluk `maxChars` ile sınırlanır.
+    static func attachmentContentText(from data: Data, maxChars: Int = 100_000) -> String {
+        let attachments = EMLXParser.extractAttachments(data: data)
+        guard !attachments.isEmpty else { return "" }
+        var pieces: [String] = []
+        var budget = maxChars
+        for attachment in attachments where budget > 0 {
+            guard let text = AttachmentTextFast.fastText(
+                data: attachment.data, fileName: attachment.filename, maxChars: budget),
+                  !text.isEmpty else { continue }
+            pieces.append(text)
+            budget -= text.count
+        }
+        return pieces.joined(separator: "\n")
     }
 
     /// Dosya yolundan kararlı bir kimlik üretir (yeniden indekslemede aynı satır güncellenir).

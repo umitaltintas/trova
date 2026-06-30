@@ -61,6 +61,7 @@ final class AppModel {
     var totalCount = 0
     var vectorCount = 0
     var memoryCount = 0
+    var attachmentContentCount = 0   // ek içeriği indekslenmiş mail sayısı (Ayarlar göstergesi)
     var accounts: [AccountStat] = []
 
     // Kişiler (en çok yazışılanlar)
@@ -291,11 +292,14 @@ final class AppModel {
         busy = true; errorMessage = nil; jobProcessed = 0; jobTotal = 0
         progress = "Yeni mail algılandı, güncelleniyor…"
         let flag = CancellationFlag(); cancelFlag = flag
+        // Opt-in ek içeriği ayarı: yeni gelen maillerde de (AÇIKsa) ek metni indekslenir.
+        let indexAttContent = UserDefaults.standard.bool(forKey: SettingsKeys.indexAttachmentContent)
         currentTask = Task {
             let result = await background { () -> IndexResult in
                 guard let root = MailStore.locate() else { throw AppError.noMailStore }
                 let store = try IndexStore(path: AppPaths.databaseURL)
-                return try Indexer.run(store: store, root: root, cancel: flag) { processed, total in
+                return try Indexer.run(store: store, root: root,
+                                       indexAttachmentContent: indexAttContent, cancel: flag) { processed, total in
                     Task { @MainActor in
                         self.jobProcessed = processed; self.jobTotal = total
                         self.progress = "İndeksleniyor \(processed)/\(total)"
@@ -379,12 +383,14 @@ final class AppModel {
 
     func refreshStatus() {
         Task {
-            guard let stats = await background({ () -> (Int, Int, Int, [AccountStat]) in
+            guard let stats = await background({ () -> (Int, Int, Int, Int, [AccountStat]) in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 let accounts = try store.accountCounts().map { AccountStat(account: $0.account, count: $0.count) }
-                return (try store.count(), try store.vectorCount(), try store.memoryCount(), accounts)
+                return (try store.count(), try store.vectorCount(), try store.memoryCount(),
+                        try store.attachmentContentCount(), accounts)
             }) else { return }
-            totalCount = stats.0; vectorCount = stats.1; memoryCount = stats.2; accounts = stats.3
+            totalCount = stats.0; vectorCount = stats.1; memoryCount = stats.2
+            attachmentContentCount = stats.3; accounts = stats.4
             statusLoaded = true
         }
         refreshProviders()
@@ -601,12 +607,15 @@ final class AppModel {
         guard !busy else { return }
         busy = true; errorMessage = nil; jobProcessed = 0; jobTotal = 0; progress = "Taranıyor…"
         let flag = CancellationFlag(); cancelFlag = flag
+        // Opt-in: ek içeriği indeksleme ayarı (varsayılan KAPALI). KAPALIYKEN ek metni çıkarılmaz.
+        let indexAttContent = UserDefaults.standard.bool(forKey: SettingsKeys.indexAttachmentContent)
         currentTask = Task {
             defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus() }
             let result = await background { () -> IndexResult in
                 guard let root = MailStore.locate() else { throw AppError.noMailStore }
                 let store = try IndexStore(path: AppPaths.databaseURL)
-                return try Indexer.run(store: store, root: root, cancel: flag) { processed, total in
+                return try Indexer.run(store: store, root: root,
+                                       indexAttachmentContent: indexAttContent, cancel: flag) { processed, total in
                     Task { @MainActor in
                         self.jobProcessed = processed; self.jobTotal = total
                         self.progress = "İndeksleniyor \(processed)/\(total)"
@@ -618,6 +627,40 @@ final class AppModel {
                     ? "\(result.indexed) yeni · \(result.skipped) atlandı · \(result.failed) hata"
                     : "Mail bulunamadı"
             }
+        }
+    }
+
+    /// Ek içeriği backfill geçişini başlatır (opt-in toggle AÇIK olmalı): eki olan TÜM mevcut
+    /// mailleri gezip eklerden OCR'SIZ ucuz metni çıkarır ve aranabilir kılar. İlerleme + iptal.
+    /// Artımlı indeksleme değişmemiş mailleri atladığından bu ayrı geçiş gereklidir.
+    func runAttachmentContentPass() {
+        guard !busy else { return }
+        busy = true; errorMessage = nil; jobProcessed = 0; jobTotal = 0; progress = "Ek içeriği taranıyor…"
+        let flag = CancellationFlag(); cancelFlag = flag
+        currentTask = Task {
+            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus() }
+            let count = await background { () -> Int in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                return try Indexer.indexAttachmentContentPass(store: store, cancel: flag) { processed, total in
+                    Task { @MainActor in
+                        self.jobProcessed = processed; self.jobTotal = total
+                        self.progress = "Ek içeriği indeksleniyor \(processed)/\(total)"
+                    }
+                }
+            }
+            if let count {
+                progress = count == 0 ? "İçerik çıkarılabilen ek bulunamadı"
+                                      : "Bitti · \(count) mailin eki indekslendi"
+            }
+        }
+    }
+
+    /// Ek içeriği FTS tablosunu boşaltır (toggle kapatıldıktan sonra temizlemek için).
+    func clearAttachmentContent() {
+        guard !busy else { return }
+        Task {
+            _ = await background { try IndexStore(path: AppPaths.databaseURL).clearAttachmentContent() }
+            refreshStatus()
         }
     }
 
@@ -671,6 +714,8 @@ final class AppModel {
             unreadOnly: unreadOnly, flaggedOnly: flaggedOnly)
         // PRF (sorgu genişletme) ayarı: açıksa ilk sonuçlardan terim çıkarıp sorguya eklenir.
         let prf = UserDefaults.standard.bool(forKey: SettingsKeys.queryExpansion)
+        // Opt-in: ek içeriği aramaya katılsın mı (varsayılan KAPALI → hiç sorgu çalışmaz).
+        let includeAttContent = UserDefaults.standard.bool(forKey: SettingsKeys.indexAttachmentContent)
         isSearching = true; errorMessage = nil; expansionChips = []
         // Vurgulanacak terimler: önce temizlenmiş sorgu tokenları (genişletme sonuçla birlikte gelir).
         highlightTerms = AppModel.highlightTerms(query: q, expansion: [])
@@ -694,7 +739,8 @@ final class AppModel {
                 // Reranking yalnızca anlamsal/hibrit modlarda anlamlıdır.
                 let reranker = selectedMode == .fts ? nil : Providers.reranker()
                 let hits = try Searcher(store: store, embedder: embedder, reranker: reranker,
-                                        maxPerThread: Retrieval.maxPerThread())
+                                        maxPerThread: Retrieval.maxPerThread(),
+                                        includeAttachmentContent: includeAttContent)
                     .search(effectiveQuery, mode: selectedMode, filter: filter, limit: 50)
                 return (hits, terms)
             }

@@ -13,13 +13,18 @@ public struct Searcher: Sendable {
     let reranker: Reranker?
     /// Thread başına en fazla sonuç (çeşitlendirme). nil → çeşitlendirme kapalı (davranış aynı).
     let maxPerThread: Int?
+    /// Ek içeriği aramasını (opt-in) sonuç havuzuna EK kaynak olarak katar. Varsayılan false →
+    /// hiçbir ek-içeriği sorgusu çalışmaz, davranış birebir korunur.
+    let includeAttachmentContent: Bool
 
     public init(store: IndexStore, embedder: EmbeddingProvider? = nil,
-                reranker: Reranker? = nil, maxPerThread: Int? = nil) {
+                reranker: Reranker? = nil, maxPerThread: Int? = nil,
+                includeAttachmentContent: Bool = false) {
         self.store = store
         self.embedder = embedder
         self.reranker = reranker
         self.maxPerThread = maxPerThread
+        self.includeAttachmentContent = includeAttachmentContent
     }
 
     public func search(_ query: String, mode: SearchMode,
@@ -33,11 +38,13 @@ public struct Searcher: Sendable {
         case .fts:
             // Kelime araması yeniden sıralanmaz; çeşitlendirme için yine de derin havuz çekilir.
             let hits = try store.search(query: query, filter: filter, limit: pool)
-            return finalize(hits, limit: limit)
+            return try finalizeWithAttachments(hits, query: query, allowed: allowed, pool: pool, limit: limit)
 
         case .semantic:
             guard let embedder else {
-                return finalize(try store.search(query: query, filter: filter, limit: pool), limit: limit)
+                return try finalizeWithAttachments(
+                    try store.search(query: query, filter: filter, limit: pool),
+                    query: query, allowed: allowed, pool: pool, limit: limit)
             }
             let ranked = try store.vectorSearch(query: try embedder.embed(query),
                                                 limit: pool, allowedIDs: allowed)
@@ -45,11 +52,15 @@ public struct Searcher: Sendable {
             let hits = ranked.compactMap { hit in
                 meta[hit.id].map { withScore($0, Double(hit.score)) }
             }
-            return finalize(try rerankedPool(query, hits, pool: pool), limit: limit)
+            return try finalizeWithAttachments(
+                try rerankedPool(query, hits, pool: pool),
+                query: query, allowed: allowed, pool: pool, limit: limit)
 
         case .hybrid:
             guard let embedder else {
-                return finalize(try store.search(query: query, filter: filter, limit: pool), limit: limit)
+                return try finalizeWithAttachments(
+                    try store.search(query: query, filter: filter, limit: pool),
+                    query: query, allowed: allowed, pool: pool, limit: limit)
             }
             let ftsHits = try store.search(query: query, filter: filter, limit: max(pool, 50))
             let vecHits = try store.vectorSearch(query: try embedder.embed(query),
@@ -69,8 +80,51 @@ public struct Searcher: Sendable {
                     mailbox: m.mailbox, date: m.date, snippet: snippet, score: item.score,
                     threadKey: m.threadKey, attachments: m.attachments)
             }
-            return finalize(try rerankedPool(query, hits, pool: pool), limit: limit)
+            return try finalizeWithAttachments(
+                try rerankedPool(query, hits, pool: pool),
+                query: query, allowed: allowed, pool: pool, limit: limit)
         }
+    }
+
+    /// Ek içeriği aramasını (opt-in) havuza katıp son hâline indirger. Kapalıysa doğrudan
+    /// `finalize`. Açıkken: ek içeriğinde eşleşen mesajları işaretler ve havuzda olmayanları
+    /// EK kaynak olarak sona ekler; sonra mevcut çeşitlendirme/limit uygulanır.
+    private func finalizeWithAttachments(_ hits: [SearchHit], query: String,
+                                         allowed: Set<String>?, pool: Int, limit: Int) throws -> [SearchHit] {
+        guard includeAttachmentContent else { return finalize(hits, limit: limit) }
+        return finalize(try mergeAttachmentContent(query, into: hits, allowed: allowed, pool: pool),
+                        limit: limit)
+    }
+
+    /// Ek içeriği FTS eşleşmelerini mevcut havuzla birleştirir (muhafazakâr sıralama):
+    /// 1) Havuzdaki sonuçlardan ek içeriğinde de eşleşenleri `matchedInAttachment = true` işaretler.
+    /// 2) Havuzda OLMAYAN ek-içeriği eşleşmelerini bm25 sırasıyla, işaretli olarak sona ekler.
+    /// Hesap/tarih filtresi (`allowed`) verilmişse ek eşleşmeler de bu kümeyle sınırlanır.
+    private func mergeAttachmentContent(_ query: String, into hits: [SearchHit],
+                                        allowed: Set<String>?, pool: Int) throws -> [SearchHit] {
+        let matchIDs = try store.messageIDsMatchingAttachmentContent(query)
+        guard !matchIDs.isEmpty else { return hits }
+        var matchSet = Set(matchIDs)
+        if let allowed { matchSet.formIntersection(allowed) }   // filtre (hesap/tarih) uygula
+        guard !matchSet.isEmpty else { return hits }
+
+        // 1) Mevcut sonuçlarda ek içeriğinde de eşleşenleri işaretle (skoru/sırayı bozmadan).
+        var result = hits.map { hit -> SearchHit in
+            var h = hit
+            if matchSet.contains(hit.id) { h.matchedInAttachment = true }
+            return h
+        }
+        // 2) Havuzda olmayan ek-içeriği eşleşmelerini sona kat (bm25 sırası korunur, pool ile sınırlı).
+        let existing = Set(hits.map(\.id))
+        let extraIDs = matchIDs.filter { matchSet.contains($0) && !existing.contains($0) }.prefix(pool)
+        guard !extraIDs.isEmpty else { return result }
+        let meta = try store.hits(forIDs: Array(extraIDs))
+        for id in extraIDs {
+            guard var m = meta[id] else { continue }
+            m.matchedInAttachment = true
+            result.append(m)
+        }
+        return result
     }
 
     /// Yeniden sıralayıcı varsa havuzun tamamını LLM ile yeniden sıralar (çeşitlendirme için
