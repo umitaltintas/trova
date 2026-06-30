@@ -115,6 +115,7 @@ final class AppModel {
     var searchFromLabel: String?         // from:/gönderen: operatörü etiketi
     var searchHasAttachment = false      // has:attachment operatörü etkin mi
     var expansionChips: [String] = []    // PRF ile sorguya eklenen terimler (gösterim)
+    var highlightTerms: [String] = []    // sonuç snippet'lerinde vurgulanacak terimler (temizlenmiş sorgu + genişletme)
 
     // Filtre
     var filterAccount = ""          // "" → tüm hesaplar (accountID)
@@ -568,7 +569,9 @@ final class AppModel {
     func runSearch() {
         let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
         // Arama metni yoksa bile aktif bir filtre çipi (okunmadı/bayraklı) varsa browse'a izin ver.
-        guard !raw.isEmpty || unreadOnly || flaggedOnly else { results = []; selection = nil; return }
+        guard !raw.isEmpty || unreadOnly || flaggedOnly else {
+            results = []; selection = nil; highlightTerms = []; return
+        }
         // Önce Gmail-tarzı operatörleri (from:/has:attachment), sonra Türkçe tarih ifadesini ayrıştır.
         let ops = SearchOperatorParser.parse(raw)
         let parsed = TurkishDateParser.parse(ops.cleaned, now: Date())
@@ -590,6 +593,8 @@ final class AppModel {
         // PRF (sorgu genişletme) ayarı: açıksa ilk sonuçlardan terim çıkarıp sorguya eklenir.
         let prf = UserDefaults.standard.bool(forKey: SettingsKeys.queryExpansion)
         isSearching = true; errorMessage = nil; expansionChips = []
+        // Vurgulanacak terimler: önce temizlenmiş sorgu tokenları (genişletme sonuçla birlikte gelir).
+        highlightTerms = AppModel.highlightTerms(query: q, expansion: [])
         Task {
             let outcome = await background { () -> (hits: [SearchHit], terms: [String]) in
                 let store = try IndexStore(path: AppPaths.databaseURL)
@@ -617,9 +622,28 @@ final class AppModel {
             isSearching = false
             results = outcome?.hits ?? []
             expansionChips = outcome?.terms ?? []
+            // Genişletme (PRF) terimlerini de vurgu listesine kat (temizlenmiş sorgu + genişletme).
+            highlightTerms = AppModel.highlightTerms(query: q, expansion: outcome?.terms ?? [])
             selection = results.first?.id
             loadSelected()
         }
+    }
+
+    /// Snippet vurgusu için terim listesini üretir: temizlenmiş sorgu tokenları + genişletme
+    /// terimleri. Operatör/tarih kelimeleri çağrıdan önce `q`'dan zaten elenmiştir; burada
+    /// yalnız <2 harfli token'lar atılır, küçük harfe (Türkçe) indirilir ve tekilleştirilir.
+    static func highlightTerms(query q: String, expansion: [String]) -> [String] {
+        let locale = Locale(identifier: "tr_TR")
+        func tokenize(_ s: String) -> [String] {
+            s.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                .map { $0.lowercased(with: locale) }
+        }
+        var seen = Set<String>()
+        var result: [String] = []
+        for term in tokenize(q) + expansion.flatMap(tokenize) where term.count >= 2 {
+            if seen.insert(term).inserted { result.append(term) }
+        }
+        return result
     }
 
     /// Ham kullanıcı sorgusunu otomatik arama geçmişine ekler ve kalıcılaştırır (en yeni başta).

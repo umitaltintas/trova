@@ -392,7 +392,7 @@ private struct SearchColumn: View {
             } else {
                 List(selection: $model.selection) {
                     ForEach(model.results) { hit in
-                        ResultRow(hit: hit)
+                        ResultRow(hit: hit, terms: model.highlightTerms)
                             .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
                             .listRowSeparator(.hidden)
                     }
@@ -502,6 +502,16 @@ private struct SavedSearchButton: View {
 
 private struct ResultRow: View {
     let hit: SearchHit
+    var terms: [String] = []          // vurgulanacak arama terimleri (AppModel.highlightTerms)
+
+    /// Gösterilecek önizleme parçası: FTS «» işaretçileri ayıklanır, kalan metin terimlere göre
+    /// en yoğun pencere seçilip vurgulanır. Terim/eşleşme yoksa düz önizlemeye yakın kalır.
+    private var snippet: Snippet {
+        let clean = hit.snippet
+            .replacingOccurrences(of: "«", with: "")
+            .replacingOccurrences(of: "»", with: "")
+        return SnippetExtractor.make(body: clean, terms: terms)
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -525,11 +535,30 @@ private struct ResultRow: View {
                 Text(hit.fromName ?? hit.fromAddress ?? "—")
                     .font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1)
                 if !hit.snippet.isEmpty {
-                    Text(hit.snippet).font(.system(size: 11)).foregroundStyle(Theme.faint).lineLimit(2)
+                    Text(AttributedString(snippet: snippet))
+                        .font(.system(size: 11)).lineLimit(2)
                 }
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+extension AttributedString {
+    /// `Snippet`'ten vurgulu metin kurar: vurgu aralıkları Theme accent + yarı-kalın, gerisi
+    /// Theme.faint. Ofsetler Character birimindedir (snippet.text'e göre).
+    init(snippet: Snippet, size: CGFloat = 11) {
+        var attr = AttributedString(snippet.text)
+        attr.foregroundColor = Theme.faint
+        let total = attr.characters.count
+        for h in snippet.highlights {
+            guard h.start >= 0, h.length > 0, h.start + h.length <= total else { continue }
+            let lo = attr.index(attr.startIndex, offsetByCharacters: h.start)
+            let hi = attr.index(lo, offsetByCharacters: h.length)
+            attr[lo..<hi].foregroundColor = Theme.accent
+            attr[lo..<hi].font = .system(size: size, weight: .semibold)
+        }
+        self = attr
     }
 }
 
