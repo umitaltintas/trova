@@ -564,6 +564,13 @@ private struct ResultRow: View {
             }
         }
         .padding(.vertical, 4)
+        .contextMenu {
+            if let address = hit.fromAddress, !address.isEmpty {
+                Button { model.composeNew(to: address) } label: {
+                    Label("Yeni e-posta", systemImage: "square.and.pencil")
+                }
+            }
+        }
     }
 }
 
@@ -1060,6 +1067,11 @@ private struct PersonDetailHeader: View {
                     }
                 }
                 Spacer()
+                Button { model.composeNew(to: address) } label: {
+                    Label("Yeni e-posta", systemImage: "square.and.pencil")
+                }
+                .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
+                .help("Bu kişiye yeni e-posta oluştur (Mail.app penceresi açılır; gönderme yok)")
             }
 
             if let detail = model.personDetail {
@@ -1083,6 +1095,7 @@ private struct PersonDetailHeader: View {
 }
 
 private struct PersonRow: View {
+    @Environment(AppModel.self) private var model
     let person: SenderStat
     let action: () -> Void
 
@@ -1108,6 +1121,11 @@ private struct PersonRow: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.line, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button { model.composeNew(to: person.address) } label: {
+                Label("Yeni e-posta", systemImage: "square.and.pencil")
+            }
+        }
     }
 }
 
@@ -1320,6 +1338,12 @@ private struct ReadingPane: View {
                         }
                         .buttonStyle(.bordered).controlSize(.small)
                         .help("Maili Markdown olarak panoya kopyala")
+                        Button { model.composeReply() } label: {
+                            Label("Yanıtla", systemImage: "arrowshape.turn.up.left")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
+                        .disabled((hit.fromAddress ?? "").isEmpty)
+                        .help("Bu maile Mail.app'te yanıt oluştur (gönderme yok; yalnız pencere açılır)")
                         Button { model.openInMail() } label: {
                             Label("Mail'de Aç", systemImage: "arrow.up.forward.app")
                         }

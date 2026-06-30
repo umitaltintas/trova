@@ -834,6 +834,37 @@ final class AppModel {
         NSWorkspace.shared.open(url)
     }
 
+    /// Seçili maile yanıt için Mail.app oluşturma penceresi açar: gönderene; konu "Yan: …";
+    /// gövdede sade bir alıntı başlığı. Yalnız pencere açar — hiçbir şey göndermez/yazmaz.
+    func composeReply() {
+        guard let hit = selectedHit, let address = hit.fromAddress, !address.isEmpty else {
+            errorMessage = "Bu mailin gönderen adresi yok; yanıt penceresi açılamıyor."
+            return
+        }
+        let subject = MailtoLink.replySubject(hit.subject ?? "")
+        // Sade alıntı başlığı: "<tarih> tarihinde <gönderen> yazdı:" (boş satırlarla ayrılmış).
+        var body: String?
+        if let date = hit.date {
+            let stamp = date.formatted(date: .abbreviated, time: .shortened)
+            body = "\n\n\(stamp) tarihinde \(hit.fromName ?? address) yazdı:\n"
+        }
+        guard let url = MailtoLink.url(to: [address], subject: subject, body: body) else {
+            errorMessage = "Yanıt penceresi açılamadı."
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Verilen adrese boş bir "Yeni e-posta" oluşturma penceresi açar (yalnız alıcı dolu).
+    /// Yalnız pencere açar — hiçbir şey göndermez/yazmaz.
+    func composeNew(to address: String) {
+        guard let url = MailtoLink.url(to: [address]) else {
+            errorMessage = "Geçersiz adres; yeni e-posta açılamıyor."
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
     func runAsk() {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !isAsking else { return }

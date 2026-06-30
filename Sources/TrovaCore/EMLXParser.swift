@@ -201,13 +201,24 @@ public enum EMLXParser {
             .map { ns.substring(with: $0.range(at: 1)).trimmingCharacters(in: .whitespaces) }
     }
 
+    /// Yanıt/iletme öneki deseni (Re:/Aw:/Yan:/Fwd:/İlt: …) — thread anahtarı VE yanıt
+    /// konusu için tek kaynak. Türkçe-yerel küçük harfe indirgenmiş konu üzerinde eşleşir.
+    static let replyPrefixPattern =
+        "^\\s*(re|aw|wg|fwd?|fw|ilt|yan|ynt|yanıt|iletildi|sv|antw)(\\[\\d+\\])?\\s*:\\s*"
+
+    /// Konuda zaten bir yanıt/iletme öneki var mı (büyük/küçük harf duyarsız, Türkçe-yerel).
+    /// `MailtoLink.replySubject` bununla çift önek eklemekten kaçınır.
+    public static func hasReplyPrefix(_ subject: String) -> Bool {
+        let s = subject.lowercased(with: Locale(identifier: "tr"))
+        return s.range(of: replyPrefixPattern, options: .regularExpression) != nil
+    }
+
     /// Konu önekini sadeleştirir (Re:/Fwd:/Yan:/İlt: vb.) — thread anahtarı için.
     /// Türkçe-yerel lowercase ile başlar (İ→i, I→ı) ki "İlt:" gibi önekler eşleşsin.
     public static func normalizeSubject(_ subject: String?) -> String {
         guard let subject else { return "" }
         var s = subject.lowercased(with: Locale(identifier: "tr"))
-        let prefix = "^\\s*(re|aw|wg|fwd?|fw|ilt|yan|ynt|yanıt|iletildi|sv|antw)(\\[\\d+\\])?\\s*:\\s*"
-        while let r = s.range(of: prefix, options: .regularExpression) {
+        while let r = s.range(of: replyPrefixPattern, options: .regularExpression) {
             s.removeSubrange(r)
         }
         return s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
