@@ -17,6 +17,7 @@ struct ContentView: View {
                 else if model.section == .ask { AskColumn() }
                 else if model.section == .digest { DigestColumn() }
                 else if model.section == .people { PeopleColumn() }
+                else if model.section == .insights { InsightsColumn() }
                 else { SearchColumn() }
             }
             .navigationSplitViewColumnWidth(min: 340, ideal: 440)
@@ -47,6 +48,7 @@ private struct KeyboardShortcuts: View {
             Button("") { model.section = .digest }.keyboardShortcut("3", modifiers: .command)
             Button("") { model.section = .people; model.selectedPersonAddress = nil }
                 .keyboardShortcut("4", modifiers: .command)
+            Button("") { model.section = .insights }.keyboardShortcut("5", modifiers: .command)
         }
         .opacity(0).frame(width: 0, height: 0)
     }
@@ -108,6 +110,8 @@ private struct Sidebar: View {
                            icon: "person.2", active: model.section == .people) {
                     model.section = .people; model.selectedPersonAddress = nil
                 }
+                ModeButton(title: "Genel Bakış", subtitle: "İstatistik + aylık hacim",
+                           icon: "chart.bar", active: model.section == .insights) { model.section = .insights }
             }
 
             StatusBlock()

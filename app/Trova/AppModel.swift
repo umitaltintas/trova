@@ -52,7 +52,7 @@ final class AppModel {
         var running = true
     }
 
-    enum Section: Equatable { case ask, search, digest, people }
+    enum Section: Equatable { case ask, search, digest, people, insights }
     var section: Section = .ask
 
     // Durum
@@ -68,6 +68,10 @@ final class AppModel {
     var selectedPersonAddress: String?
     var personMails: [SearchHit] = []
     var personDetail: SenderDetail?      // seçili kişinin mini analitiği
+
+    // Genel Bakış (insights)
+    var monthly: [MonthCount] = []
+    var attachmentTotal = 0
 
     // Sağlık / kurulum (HealthCheck girdileri)
     var llmConfigured = false
@@ -235,6 +239,7 @@ final class AppModel {
         loadMemories()
         loadPeople()
         loadSavedSearches()
+        loadInsights()
     }
 
     /// Kayıtlı aramaları arka planda tazeler.
@@ -273,6 +278,18 @@ final class AppModel {
         Task {
             _ = await background { try IndexStore(path: AppPaths.databaseURL).deleteSavedSearch(id) }
             loadSavedSearches()
+        }
+    }
+
+    /// "Genel Bakış" verilerini (aylık hacim + ekli sayısı) arka planda tazeler.
+    func loadInsights() {
+        Task {
+            guard let data = await background({ () -> (monthly: [MonthCount], attachments: Int) in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                return (try store.monthlyCounts(months: 12, now: Date()), try store.attachmentCount())
+            }) else { return }
+            monthly = data.monthly
+            attachmentTotal = data.attachments
         }
     }
 

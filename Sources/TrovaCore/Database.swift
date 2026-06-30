@@ -79,6 +79,14 @@ public struct SenderStat: Sendable, Equatable, Identifiable {
     }
 }
 
+/// Bir ayın mail sayısı ("Genel Bakış" aylık hacim grafiği için). month: "yyyy-MM".
+public struct MonthCount: Sendable, Equatable, Identifiable {
+    public let month: String
+    public let count: Int
+    public var id: String { month }
+    public init(month: String, count: Int) { self.month = month; self.count = count }
+}
+
 /// Bir kişinin mini analitiği ("Kişiler" detayında gösterilir).
 public struct SenderDetail: Sendable, Equatable {
     public let total: Int
@@ -393,6 +401,46 @@ public final class IndexStore: Sendable {
         }
     }
 
+    /// Ekli (boş olmayan attachments) mail sayısı.
+    public func attachmentCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql:
+                "SELECT COUNT(*) FROM message WHERE attachments IS NOT NULL AND attachments <> ''") ?? 0
+        }
+    }
+
+    /// Son `months` ayın aylık mail sayıları (en eskiden yeniye, eksik aylar 0 ile doldurulur).
+    /// Bucket'lama Swift'te yapılır (saklama formatı/zaman dilimi tutarlılığı için); `now`/`calendar`
+    /// enjekte edilebildiğinden deterministik test edilir.
+    public func monthlyCounts(months: Int, now: Date, calendar: Calendar = .current) throws -> [MonthCount] {
+        guard months > 0 else { return [] }
+        let thisMonthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
+        let cutoff = calendar.date(byAdding: .month, value: -(months - 1), to: thisMonthStart) ?? thisMonthStart
+
+        let dates: [Date] = try dbQueue.read { db in
+            try Date.fetchAll(db, sql: "SELECT date FROM message WHERE date >= ?", arguments: [cutoff])
+        }
+
+        let fmt = DateFormatter()
+        fmt.calendar = calendar
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = calendar.timeZone
+        fmt.dateFormat = "yyyy-MM"
+
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        for i in stride(from: months - 1, through: 0, by: -1) {
+            let monthDate = calendar.date(byAdding: .month, value: -i, to: thisMonthStart) ?? thisMonthStart
+            let label = fmt.string(from: monthDate)
+            order.append(label); counts[label] = 0
+        }
+        for date in dates {
+            let label = fmt.string(from: date)
+            if counts[label] != nil { counts[label]! += 1 }
+        }
+        return order.map { MonthCount(month: $0, count: counts[$0] ?? 0) }
+    }
+
     /// Bir kişinin (gönderen adresi) mini analitiği: toplam, ekli sayısı, ilk/son tarih.
     public func senderStats(address: String) throws -> SenderDetail {
         let key = address.lowercased()
@@ -657,7 +705,7 @@ public final class IndexStore: Sendable {
     public func allSavedSearches() throws -> [SavedSearch] {
         try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT id, name, query, mode FROM saved_search ORDER BY createdAt DESC
+                SELECT id, name, query, mode FROM saved_search ORDER BY createdAt DESC, rowid DESC
                 """).map {
                 SavedSearch(id: $0["id"], name: $0["name"], query: $0["query"], mode: $0["mode"])
             }
