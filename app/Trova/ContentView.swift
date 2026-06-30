@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import TrovaCore
 
 struct ContentView: View {
@@ -46,6 +47,21 @@ struct ContentView: View {
                 .help("Vektör gömmelerini üret")
             }
         }
+        // KÖK NEDEN DÜZELTMESİ: NavigationSplitView'i destekleyen NSSplitView, AppKit'in otomatik
+        // kayıt (autosave) mekanizmasıyla önceki bir pencere/ekran boyutundan kalma alt-görünüm
+        // YÜKSEKLİĞİNİ ("NSSplitView Subview Frames …") geri yüklüyor; bu değer GÜNCEL pencere
+        // yüksekliğiyle uyuşmadığında (ekran görüntüsüyle doğrulandı: kayıtlı 1526pt'e karşı
+        // gerçek pencere 572pt) kenar çubuğunun TÜM içeriği (başlık, 6 mod düğmesi, FİLTRE bloğu,
+        // alt sabit Sağlık/Otomatik-senkron bloğu) görünüm alanının DIŞINA taşıyor — kenar çubuğu
+        // tamamen BOŞ görünüyor. Bu, önceki iki düzeltmenin (trafik ışığı çakışması, ScrollView'a
+        // geçiş) neden işe yaramadığını açıklıyor: ikisi de SwiftUI tarafı doğruydu, ama AppKit'in
+        // bozuk/eski autosave durumunu hiç ele almıyorlardı. Bu uygulamadaki panel genişlikleri
+        // zaten kod içinde (navigationSplitViewColumnWidth) sabitlendiğinden autosave'in kattığı
+        // hiçbir değer yok, yalnız risk taşıyor — bu yüzden aşağıdaki düzeltme KOŞULSUZ devreye
+        // girer: pencere her göründüğünde tüm NSSplitView'lerin autosave adını kalıcı olarak
+        // temizler (bozuk geri yüklemeyi bir daha asla yapmasın/kaydetmesin) ve `adjustSubviews()`
+        // ile alt görünümleri GERÇEK güncel sınırlara göre yeniden hesaplatır.
+        .background(SplitViewAutosaveFixer())
         .task { model.onAppear(); if autoSync { model.setAutoSync(true) } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.refreshAccess(); model.refreshStatus() }
@@ -54,6 +70,47 @@ struct ContentView: View {
         .background { KeyboardShortcuts(showPalette: $showPalette) }
         .sheet(isPresented: $showPalette) { CommandPaletteView().environment(model) }
         .sheet(isPresented: $model.showShortcuts) { ShortcutsSheet() }
+    }
+}
+
+/// Görünmez yardımcı: ana pencereyi bulup içindeki `NSSplitView`lerin (NavigationSplitView'in
+/// AppKit karşılığı) eski/uyumsuz autosave durumunu KOŞULSUZ olarak temizler. Bkz. `ContentView`
+/// içindeki "KÖK NEDEN DÜZELTMESİ" yorumu. Pencere göründüğünde ve her içerik güncellemesinde
+/// tekrar çalışır ki SwiftUI, NavigationSplitView'i yeniden kurarken autosave adını yeniden atasa
+/// bile düzeltme kalıcı olsun.
+private struct SplitViewAutosaveFixer: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let probe = NSView(frame: .zero)
+        scheduleFix(from: probe)
+        return probe
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        scheduleFix(from: nsView)
+    }
+
+    private func scheduleFix(from probe: NSView) {
+        // Pencere/contentView hemen hazır olmayabilir; birkaç kez deneyerek geç bağlanan
+        // durumları da (ör. SwiftUI'nin split view'ı yeniden kurduğu anlar) yakala.
+        for delay in [0.0, 0.2, 0.6, 1.5] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak probe] in
+                guard let probe, let window = probe.window, let contentView = window.contentView else { return }
+                for splitView in contentView.descendantSplitViews() {
+                    splitView.autosaveName = nil
+                    splitView.adjustSubviews()
+                }
+            }
+        }
+    }
+}
+
+private extension NSView {
+    /// Bu görünümün altındaki tüm `NSSplitView` torunlarını (kendisi dahil) derinlik-öncelikli tarar.
+    func descendantSplitViews() -> [NSSplitView] {
+        var result: [NSSplitView] = []
+        if let splitView = self as? NSSplitView { result.append(splitView) }
+        for sub in subviews { result.append(contentsOf: sub.descendantSplitViews()) }
+        return result
     }
 }
 
@@ -160,6 +217,16 @@ private struct Sidebar: View {
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            // EK KÖK NEDEN DÜZELTMESİ: Yalnızca dış NSSplitView'in autosave durumunu düzeltmek
+            // yetmiyor — bu ScrollView'i barındıran iç NSScrollView, dış pencere/split geçici
+            // olarak yanlış (eski autosave'ten kalma, ör. 1526/2400pt) bir yükseklikle kurulduğu
+            // anda kayma konumunu da o yanlış yüksekliğe göre belirleyebiliyor; dış geometri
+            // sonradan doğru pencere boyutuna (ör. 572pt) düzeltilse bile kayma konumu İÇERİĞİN
+            // TAMAMEN DIŞINA (boş alana) kaymış halde kalabiliyor — kenar çubuğu o zaman tümüyle
+            // BOŞ görünür (ekran görüntüsüyle doğrulandı). `.defaultScrollAnchor(.top)` bu
+            // ScrollView'i HER zaman en üstten göstermeye zorlar, alttaki AppKit kayma durumu ne
+            // olursa olsun.
+            .defaultScrollAnchor(.top)
 
             Divider().overlay(Theme.line)
 
