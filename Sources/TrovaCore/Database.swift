@@ -68,6 +68,17 @@ public struct SearchHit: Sendable, Identifiable {
     public var attachments: [String] = []
 }
 
+/// En çok yazışılan bir kişinin özeti ("Kişiler" görünümü için).
+public struct SenderStat: Sendable, Equatable, Identifiable {
+    public let name: String?
+    public let address: String
+    public let count: Int
+    public var id: String { address }
+    public init(name: String?, address: String, count: Int) {
+        self.name = name; self.address = address; self.count = count
+    }
+}
+
 /// Arama filtresi: hesap ve tarih aralığı.
 public struct SearchFilter: Sendable, Equatable {
     public var accountID: String?
@@ -340,6 +351,38 @@ public final class IndexStore: Sendable {
                 "SELECT COUNT(*) FROM message WHERE fromName LIKE ? OR fromAddress LIKE ?",
                 arguments: [like, like]) ?? 0
         }
+    }
+
+    /// En çok mail ALDIĞIN kişiler (gönderen adresine göre). Gönderilenler/çöp gibi kutular
+    /// (isActionableMailbox=false) hariç tutulur ki kendi adresin listeyi kirletmesin.
+    /// Adres küçük harfle gruplanır; temsilci görünen ad ilk dolu addan alınır.
+    public func topSenders(limit: Int) throws -> [SenderStat] {
+        let rows = try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT fromName AS n, fromAddress AS a, mailbox AS m
+                FROM message WHERE fromAddress IS NOT NULL AND fromAddress <> ''
+                """)
+        }
+        var counts: [String: (name: String?, address: String, count: Int)] = [:]
+        for row in rows {
+            let mailbox: String = row["m"] ?? ""
+            guard isActionableMailbox(mailbox) else { continue }
+            let address: String = row["a"] ?? ""
+            guard !address.isEmpty else { continue }
+            let name: String? = row["n"]
+            let key = address.lowercased()
+            if var existing = counts[key] {
+                existing.count += 1
+                if (existing.name?.isEmpty ?? true), let name, !name.isEmpty { existing.name = name }
+                counts[key] = existing
+            } else {
+                counts[key] = (name: (name?.isEmpty == false ? name : nil), address: address, count: 1)
+            }
+        }
+        return counts.values
+            .sorted { $0.count > $1.count }
+            .prefix(limit)
+            .map { SenderStat(name: $0.name, address: $0.address, count: $0.count) }
     }
 
     // MARK: - Proaktif asistan / triyaj (Faz 7)

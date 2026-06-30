@@ -52,7 +52,7 @@ final class AppModel {
         var running = true
     }
 
-    enum Section: Equatable { case ask, search, digest }
+    enum Section: Equatable { case ask, search, digest, people }
     var section: Section = .ask
 
     // Durum
@@ -62,6 +62,11 @@ final class AppModel {
     var vectorCount = 0
     var memoryCount = 0
     var accounts: [AccountStat] = []
+
+    // Kişiler (en çok yazışılanlar)
+    var people: [SenderStat] = []
+    var selectedPersonAddress: String?
+    var personMails: [SearchHit] = []
 
     // Sağlık / kurulum (HealthCheck girdileri)
     var llmConfigured = false
@@ -132,6 +137,7 @@ final class AppModel {
             ?? selectedThread.first { $0.id == selection }
             ?? needsReply.first { $0.id == selection }
             ?? waitingOn.first { $0.id == selection }
+            ?? personMails.first { $0.id == selection }
             ?? conversation.flatMap(\.cited).first { $0.id == selection }
     }
 
@@ -217,6 +223,30 @@ final class AppModel {
         loadTriage()   // indeksleme/durum yenilemesi sonrası triyaj listeleri de tazelensin
         loadConversations()
         loadMemories()
+        loadPeople()
+    }
+
+    /// En çok yazışılan kişileri arka planda tazeler ("Kişiler" görünümü için).
+    func loadPeople() {
+        Task {
+            guard let list = await background({
+                try IndexStore(path: AppPaths.databaseURL).topSenders(limit: 60)
+            }) else { return }
+            people = list
+        }
+    }
+
+    /// Seçilen kişinin maillerini yükler (en yeni önce) ve ilkini okuma paneline getirir.
+    func selectPerson(_ address: String) {
+        selectedPersonAddress = address
+        Task {
+            guard let mails = await background({
+                try IndexStore(path: AppPaths.databaseURL).fromSender(address, limit: 200)
+            }) else { return }
+            personMails = mails
+            selection = mails.first?.id
+            loadSelected()
+        }
     }
 
     /// Geçmiş sohbetleri arka planda tazeler (geçmiş tarayıcısı için).

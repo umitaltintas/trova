@@ -15,6 +15,7 @@ struct ContentView: View {
                 if model.shouldShowSetup { SetupView() }
                 else if model.section == .ask { AskColumn() }
                 else if model.section == .digest { DigestColumn() }
+                else if model.section == .people { PeopleColumn() }
                 else { SearchColumn() }
             }
             .navigationSplitViewColumnWidth(min: 340, ideal: 440)
@@ -76,6 +77,10 @@ private struct Sidebar: View {
                            icon: "magnifyingglass", active: model.section == .search) { model.section = .search }
                 ModeButton(title: "Bugün", subtitle: "Brifing + yanıt bekleyenler",
                            icon: "sun.max", active: model.section == .digest) { model.section = .digest }
+                ModeButton(title: "Kişiler", subtitle: "En çok yazışılanlar",
+                           icon: "person.2", active: model.section == .people) {
+                    model.section = .people; model.selectedPersonAddress = nil
+                }
             }
 
             StatusBlock()
@@ -667,6 +672,127 @@ private struct CitedRow: View {
                         in: RoundedRectangle(cornerRadius: Theme.radiusSmall))
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall)
                 .stroke(selected ? Theme.accent.opacity(0.5) : Theme.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Kişiler sütunu
+
+private struct PeopleColumn: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let address = model.selectedPersonAddress {
+                PersonDetailHeader(address: address)
+                Divider().overlay(Theme.line)
+                personMails
+            } else {
+                header
+                Divider().overlay(Theme.line)
+                peopleList
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.surface)
+        .task { if model.people.isEmpty { model.loadPeople() } }
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Kişiler").font(.rounded(18, .bold)).foregroundStyle(Theme.ink)
+            Spacer()
+            if !model.people.isEmpty {
+                Text("\(model.people.count) kişi").font(.mono(11)).foregroundStyle(Theme.muted)
+            }
+        }
+        .padding(16)
+    }
+
+    @ViewBuilder
+    private var peopleList: some View {
+        if model.people.isEmpty {
+            EmptyState(icon: "person.2", title: "Henüz kişi yok",
+                       subtitle: "Mailleri indeksleyince en çok yazıştığın kişiler burada listelenir.")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                VStack(spacing: 6) {
+                    ForEach(model.people) { person in
+                        PersonRow(person: person) { model.selectPerson(person.address) }
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private var personMails: some View {
+        ScrollView {
+            VStack(spacing: 6) {
+                ForEach(model.personMails) { hit in
+                    CitedRow(hit: hit, selected: hit.id == model.selection) {
+                        model.selection = hit.id; model.loadSelected()
+                    }
+                }
+            }
+            .padding(12)
+        }
+    }
+}
+
+private struct PersonDetailHeader: View {
+    @Environment(AppModel.self) private var model
+    let address: String
+
+    private var person: SenderStat? { model.people.first { $0.address == address } }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button {
+                model.selectedPersonAddress = nil
+                model.personMails = []
+            } label: {
+                Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(.plain).foregroundStyle(Theme.accent).help("Kişilere dön")
+            Avatar(name: person?.name, email: address, size: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(person?.name ?? address).font(.rounded(14, .semibold))
+                    .foregroundStyle(Theme.ink).lineLimit(1)
+                Text("\(model.personMails.count) mail").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            }
+            Spacer()
+        }
+        .padding(14)
+    }
+}
+
+private struct PersonRow: View {
+    let person: SenderStat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Avatar(name: person.name, email: person.address, size: 32)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(person.name ?? person.address).font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.ink).lineLimit(1)
+                    if person.name != nil {
+                        Text(person.address).font(.system(size: 10))
+                            .foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                }
+                Spacer()
+                Text("\(person.count)").font(.mono(11)).foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Theme.accentSoft, in: Capsule())
+            }
+            .padding(10)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusSmall))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.line, lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
