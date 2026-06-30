@@ -377,7 +377,8 @@ private struct SearchColumn: View {
             }
             .padding(10).cardSurface().padding(.horizontal, 12).padding(.top, 12)
 
-            HStack(spacing: 6) {
+            // Durum + hızlı tarih filtre çipleri; dar panoda FlowLayout ile alt satıra sarar (taşma yok).
+            FlowLayout(spacing: 6, lineSpacing: 6) {
                 FilterToggleChip(text: "Okunmadı", systemImage: "envelope.badge",
                                  isOn: model.unreadOnly) {
                     model.unreadOnly.toggle(); model.runSearch()
@@ -390,8 +391,15 @@ private struct SearchColumn: View {
                                  isOn: model.pinnedOnly) {
                     model.pinnedOnly.toggle(); model.runSearch()
                 }
-                Spacer()
+                // Hızlı tarih çipleri: tek tıkla (yazmadan) aralık; aktif olan vurgulu, tekrar tıklayınca kalkar.
+                ForEach(QuickDateRange.allCases, id: \.self) { kind in
+                    FilterToggleChip(text: kind.label, systemImage: kind.systemImage,
+                                     isOn: model.activeQuickDate == kind) {
+                        model.toggleQuickDate(kind)
+                    }
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14).padding(.top, 8)
 
             if model.detectedDateLabel != nil || model.searchFromLabel != nil
@@ -428,7 +436,8 @@ private struct SearchColumn: View {
                     hasIndex: model.totalCount > 0,
                     hasQuery: !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     hasFilters: model.unreadOnly || model.flaggedOnly || model.pinnedOnly
-                              || !model.filterAccount.isEmpty || model.dateRange != .all),
+                              || !model.filterAccount.isEmpty || model.dateRange != .all
+                              || model.activeQuickDate != nil),
                     action: { model.runIndex() })
             } else {
                 // Sonuç sayısı + sıralama seçimi + listeyi Markdown'a dışa aktarma (yalnız sonuç varken).

@@ -155,6 +155,7 @@ final class AppModel {
     var unreadOnly = false          // yalnızca okunmamış mailler
     var flaggedOnly = false         // yalnızca bayraklı mailler
     var pinnedOnly = false          // yalnızca Trova-yerel yıldızlı (pinned) mailler
+    var activeQuickDate: QuickDateRange?   // aktif hızlı tarih çipi (Bugün/Son 7g/Son 30g/Bu yıl); runSearch tarihini geçersiz kılar
 
     // Trova-yerel yıldızlı (pin) koleksiyonu: gösterim için yüklenen id kümesi (message.id).
     // Sonuç satırı yıldız rozeti + ReadingPane "Yıldızla/Yıldızı kaldır" toggle'ı bunu izler.
@@ -452,7 +453,7 @@ final class AppModel {
         case .search:
             // Yalnız anlamlı bir sorgu/filtre varsa mevcut aramayı sessizce yeniden çalıştır.
             let hasQuery = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if hasQuery || unreadOnly || flaggedOnly || pinnedOnly { runSearch() }
+            if hasQuery || unreadOnly || flaggedOnly || pinnedOnly || activeQuickDate != nil { runSearch() }
         case .digest:
             loadTriage()              // triyaj listeleri (LLM brifingine dokunmadan)
         case .insights:
@@ -1031,6 +1032,15 @@ final class AppModel {
         }
     }
 
+    /// Hızlı tarih çipine dokununca tarih aralığını set edip aramayı (mevcut sorguyla) çalıştırır.
+    /// Toggle: aynı çipe tekrar dokununca filtre kalkar. Aktifken `runSearch` tarih filtresini bu
+    /// aralıkla geçersiz kılar (yazılı tarih ve kenar çubuğu picker'ı dahil). Sorgu boşken bile
+    /// (yalnız çip) sonuçları gözatma kipinde listeler.
+    func toggleQuickDate(_ kind: QuickDateRange) {
+        activeQuickDate = (activeQuickDate == kind) ? nil : kind
+        runSearch()
+    }
+
     func runSearch() {
         let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
         // Yeni arama: eski gönderen daraltması yeni sonuçlara yapışmasın diye sıfırla.
@@ -1038,13 +1048,15 @@ final class AppModel {
         // Yeni arama: önceki çoklu seçim yeni sonuçlarla tutarsız kalmasın diye temizle.
         selectedResultIDs.removeAll()
         // Arama metni yoksa bile aktif bir filtre çipi (okunmadı/bayraklı/yıldızlı) varsa browse'a izin ver.
-        guard !raw.isEmpty || unreadOnly || flaggedOnly || pinnedOnly else {
+        guard !raw.isEmpty || unreadOnly || flaggedOnly || pinnedOnly || activeQuickDate != nil else {
             results = []; selection = nil; highlightTerms = []; return
         }
         // Önce Gmail-tarzı operatörleri (from:/has:attachment), sonra Türkçe tarih ifadesini ayrıştır.
         let ops = SearchOperatorParser.parse(raw)
         let parsed = TurkishDateParser.parse(ops.cleaned, now: Date())
-        detectedDateLabel = parsed.hint?.label
+        // Hızlı tarih çipi aktifse yazılı tarih ve picker'ı geçersiz kılar; çip etiketi de onu gösterir.
+        let quick = activeQuickDate.map { QuickDate.range($0, now: Date(), calendar: .current) }
+        detectedDateLabel = activeQuickDate?.label ?? parsed.hint?.label
         searchFromLabel = ops.fromContains
         searchHasAttachment = ops.hasAttachment
         searchAttachmentKind = ops.attachmentKind
@@ -1054,8 +1066,8 @@ final class AppModel {
         if !q.isEmpty { recordRecent(raw) }
         let selectedMode = mode
         // Algılanan tarih aralığı, kenar çubuğundaki tarih picker'ını geçersiz kılar.
-        let since = parsed.hint?.since ?? dateRange.since
-        let until = parsed.hint?.until
+        let since = quick?.since ?? parsed.hint?.since ?? dateRange.since
+        let until = quick?.until ?? parsed.hint?.until
         let filter = SearchFilter(
             accountID: filterAccount.isEmpty ? nil : filterAccount, since: since, until: until,
             fromContains: ops.fromContains, hasAttachment: ops.hasAttachment,
