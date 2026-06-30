@@ -56,8 +56,9 @@ public enum EmptyStates {
         return EmptyStateContent(
             systemImage: "magnifyingglass",
             title: "Aramaya başla",
-            message: "Anahtar kelime ya da anlamsal bir sorgu yaz. Operatör ve tarih de kullanabilirsin: "
-                   + "\"son 7 gün fatura\", \"from:ali\", \"has:attachment\".",
+            message: "Anahtar kelime ya da anlamsal bir sorgu yaz. Operatör, tarih ve gelişmiş söz dizimi "
+                   + "de kullanabilirsin: \"son 7 gün fatura\", from:ali, has:attachment, "
+                   + "\"tam ifade\" (tırnakla birebir), -hariç (terimi dışla).",
             actionLabel: nil)
     }
 

@@ -615,7 +615,9 @@ public final class IndexStore: Sendable {
     /// FTS5 tam metin araması; bm25 ile sıralanır, gövdeden parça (snippet) döner.
     /// İsteğe bağlı hesap/tarih filtresi uygulanır.
     public func search(query: String, filter: SearchFilter = .init(), limit: Int) throws -> [SearchHit] {
-        let pattern = Self.ftsPattern(query)
+        // Gelişmiş sözdizimi ("tam ifade", -hariç) destekli FTS5 ifadesi; gelişmiş söz dizimi
+        // yoksa içeride `ftsPattern`'e düşer → normal/tek-terim arama çıktısı ESKİYLE aynı.
+        let pattern = FtsQueryBuilder.build(query)
         guard !pattern.isEmpty else { return [] }
         let (clause, filterArgs) = Self.filterSQL(filter)
         return try dbQueue.read { db in
@@ -639,7 +641,8 @@ public final class IndexStore: Sendable {
     }
 
     /// Ölçütlere uyan mail SAYISINI (içerik değil) döndürür — ajanın nicel/sayma soruları için.
-    /// `query` doluysa `search` ile AYNI FTS5 deseni (`ftsPattern`, tırnaklı + ön ek `*`) ve aynı
+    /// `query` doluysa `search` ile AYNI FTS5 deseni (`FtsQueryBuilder.build` → gelişmiş söz dizimi
+    /// + ftsPattern geri-düşüşü) ve aynı
     /// `message_fts JOIN message` yapısı üzerinden eşleşme + filtre sayılır; `query` boş/yalnız
     /// boşluksa FTS atlanır, yalnız `filterSQL` ile `COUNT(*)` yapılır. Mevcut `search`/`browse`
     /// davranışını bozmaz; aynı yardımcıları (ftsPattern/filterSQL) paylaşır.
@@ -653,7 +656,7 @@ public final class IndexStore: Sendable {
                                  arguments: StatementArguments(filterArgs)) ?? 0
             }
         }
-        let pattern = Self.ftsPattern(trimmed)
+        let pattern = FtsQueryBuilder.build(trimmed)   // `search` ile AYNI gelişmiş+ftsPattern davranışı
         guard !pattern.isEmpty else { return 0 }   // `search` ile tutarlı: desen boşsa eşleşme yok
         return try dbQueue.read { db in
             var args: [(any DatabaseValueConvertible)?] = [pattern]
@@ -1396,9 +1399,9 @@ extension IndexStore {
     }
 
     /// Ek içeriğinde (FTS5 MATCH) sorguyla eşleşen mesaj id'lerini bm25 sırasıyla döndürür.
-    /// Mesaj FTS'iyle aynı `ftsPattern`'i (tırnaklı + ön ek `*`) kullanır → Türkçe davranış tutarlı.
+    /// Mesaj FTS'iyle aynı `FtsQueryBuilder.build`'i kullanır → Türkçe davranış + gelişmiş söz dizimi tutarlı.
     public func messageIDsMatchingAttachmentContent(_ query: String) throws -> [String] {
-        let pattern = Self.ftsPattern(query)
+        let pattern = FtsQueryBuilder.build(query)   // mesaj FTS'iyle aynı gelişmiş+ftsPattern davranışı
         guard !pattern.isEmpty else { return [] }
         return try dbQueue.read { db in
             try String.fetchAll(db, sql: """
