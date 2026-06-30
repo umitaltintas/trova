@@ -77,6 +77,26 @@ final class TriageTests: XCTestCase {
         XCTAssertTrue(try store.waitingOnReply(minDays: 5, limit: 50).isEmpty)
     }
 
+    /// Triyaj öğeleri satır-içi hızlı aksiyonlar için id/messageID/fromAddress taşımalı
+    /// (Yanıtla → fromAddress, Mail'de Aç → messageID, Yıldızla → id).
+    func testTriageItemsCarryMessageIDAndSender() throws {
+        let store = try makeStore()
+        try store.upsert([
+            record(id: "a1", threadKey: "A", mailbox: "Sent Messages", daysAgo: 5),
+            record(id: "a2", threadKey: "A", mailbox: "INBOX", daysAgo: 2),
+            record(id: "b1", threadKey: "B", mailbox: "Gönderilmiş Postalar", daysAgo: 4),
+        ])
+
+        let need = try XCTUnwrap(store.needsReply(limit: 50).first)
+        XCTAssertEqual(need.id, "a2")
+        XCTAssertEqual(need.messageID, "<a2@test>")          // "Mail'de Aç" için RFC822 Message-ID
+        XCTAssertEqual(need.fromAddress, "x@example.com")     // "Yanıtla" için gönderen adresi
+
+        let wait = try XCTUnwrap(store.waitingOnReply(minDays: 0, limit: 50).first)
+        XCTAssertEqual(wait.id, "b1")
+        XCTAssertEqual(wait.messageID, "<b1@test>")
+    }
+
     /// `threadKey`'siz mailler kendi thread'i sayılır; en son mail kuralı yine geçerli.
     func testRecentReceivedExcludesSentAndJunk() throws {
         let store = try makeStore()

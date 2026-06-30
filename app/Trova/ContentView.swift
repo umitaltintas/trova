@@ -1411,11 +1411,17 @@ private struct TriageSection: View {
 }
 
 private struct TriageRow: View {
+    @Environment(AppModel.self) private var model
     let hit: SearchHit
     let selected: Bool
     let action: () -> Void
     let onDismiss: () -> Void
     @State private var hovering = false
+
+    // Aksiyon etkinlik durumları (öğenin alanlarına göre): adres/Message-ID yoksa ilgili aksiyon pasif.
+    private var canReply: Bool { !(hit.fromAddress ?? "").isEmpty }
+    private var canOpenInMail: Bool { MailLink.appleMailURL(messageID: hit.messageID) != nil }
+    private var pinned: Bool { model.pinnedIDs.contains(hit.id) }
 
     var body: some View {
         Button(action: action) {
@@ -1431,6 +1437,9 @@ private struct TriageRow: View {
                 if !hit.attachments.isEmpty {
                     Image(systemName: "paperclip").font(.system(size: 10)).foregroundStyle(Theme.muted)
                 }
+                if pinned {
+                    Image(systemName: "star.fill").font(.system(size: 10)).foregroundStyle(Theme.amber)
+                }
                 AgeChip(date: hit.date)
             }
             .padding(10)
@@ -1440,6 +1449,30 @@ private struct TriageRow: View {
                 .stroke(selected ? Theme.accent.opacity(0.5) : Theme.line, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        // Hızlı aksiyonlar: hover'da beliren kompakt ikon kümesi (alt sağ) — Yanıtla / Mail'de Aç / Yıldızla.
+        // Pano daralırsa FlowLayout ile alt satıra kayarlar; mevcut × "Görmezden gel" üst sağda korunur.
+        .overlay(alignment: .bottomTrailing) {
+            if hovering {
+                FlowLayout(spacing: 3, lineSpacing: 3) {
+                    actionIcon("arrowshape.turn.up.left", tint: Theme.accent, enabled: canReply,
+                               help: "Bu maile yanıt oluştur (gönderme yok; yalnız pencere açılır)",
+                               action: { model.composeReply(hit) })
+                    actionIcon("envelope", tint: Theme.accent, enabled: canOpenInMail,
+                               help: "Bu maili Apple Mail.app'te aç",
+                               action: { model.openInMail(messageID: hit.messageID) })
+                    actionIcon(pinned ? "star.fill" : "star", tint: pinned ? Theme.amber : Theme.accent,
+                               enabled: true,
+                               help: pinned ? "Trova-yerel yıldızı kaldır"
+                                            : "Bu maili Trova içinde yıldızla (Apple Mail'e yazmaz)",
+                               action: { model.togglePin(id: hit.id) })
+                }
+                .fixedSize()
+                .padding(3)
+                .background(Theme.card.opacity(0.92), in: Capsule())
+                .overlay(Capsule().stroke(Theme.line, lineWidth: 1))
+                .padding(5)
+            }
+        }
         // "Görmezden gel": hover'da beliren küçük × (sağ üst köşe) + sağ tık menüsü.
         .overlay(alignment: .topTrailing) {
             Button(action: onDismiss) {
@@ -1456,10 +1489,38 @@ private struct TriageRow: View {
         }
         .onHover { hovering = $0 }
         .contextMenu {
+            Button { model.composeReply(hit) } label: {
+                Label("Yanıtla", systemImage: "arrowshape.turn.up.left")
+            }
+            .disabled(!canReply)
+            Button { model.openInMail(messageID: hit.messageID) } label: {
+                Label("Mail'de Aç", systemImage: "envelope")
+            }
+            .disabled(!canOpenInMail)
+            Button { model.togglePin(id: hit.id) } label: {
+                Label(pinned ? "Yıldızı kaldır" : "Yıldızla", systemImage: pinned ? "star.fill" : "star")
+            }
+            Divider()
             Button { onDismiss() } label: {
                 Label("Görmezden gel", systemImage: "eye.slash")
             }
         }
+    }
+
+    /// Hover aksiyon kümesindeki tek bir kompakt ikon düğmesi (pasifse soluk ve tıklanamaz).
+    private func actionIcon(_ systemName: String, tint: Color, enabled: Bool,
+                            help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(enabled ? tint : Theme.faint)
+                .frame(width: 22, height: 22)
+                .background(Theme.card, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 

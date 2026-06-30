@@ -62,6 +62,7 @@ public struct MessageRecord: Codable, FetchableRecord, PersistableRecord, Sendab
 /// Tek bir arama sonucu (FTS5 + bm25 sıralaması).
 public struct SearchHit: Sendable, Identifiable {
     public let id: String
+    public var messageID: String? = nil  // RFC822 Message-ID (yalnız taşıyan sorgular doldurur; "Mail'de Aç" için)
     public let subject: String?
     public let fromName: String?
     public let fromAddress: String?
@@ -1026,7 +1027,7 @@ public final class IndexStore: Sendable {
     func latestPerThread() throws -> [SearchHit] {
         try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT m.id AS id, m.subject AS subject, m.fromName AS fromName,
+                SELECT m.id AS id, m.messageID AS messageID, m.subject AS subject, m.fromName AS fromName,
                        m.fromAddress AS fromAddress, m.mailbox AS mailbox, m.date AS date,
                        m.threadKey AS threadKey, m.attachments AS attachments,
                        m.isRead AS isRead, m.isFlagged AS isFlagged,
@@ -1298,7 +1299,10 @@ public final class IndexStore: Sendable {
         let attachments = (row["attachments"] as String?)?
             .split(separator: "\n").map(String.init) ?? []
         return SearchHit(
-            id: row["id"], subject: row["subject"], fromName: row["fromName"],
+            id: row["id"],
+            // messageID yalnız onu SELECT eden sorgularda (örn. triyaj) gelir; yoksa nil.
+            messageID: row.hasColumn("messageID") ? row["messageID"] : nil,
+            subject: row["subject"], fromName: row["fromName"],
             fromAddress: row["fromAddress"], mailbox: row["mailbox"], date: row["date"],
             snippet: (row["snip"] as String?) ?? "", score: (row["score"] as Double?) ?? 0,
             threadKey: row["threadKey"], attachments: attachments,

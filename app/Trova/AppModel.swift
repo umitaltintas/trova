@@ -1225,18 +1225,31 @@ final class AppModel {
     }
 
     /// Seçili maili native Apple Mail.app'te açar (message:// derin-linki). Message-ID yoksa hata gösterir.
-    func openInMail() {
-        guard let url = MailLink.appleMailURL(messageID: selectedMessageID) else {
+    func openInMail() { openInMail(messageID: selectedMessageID) }
+
+    /// Verilen Message-ID'li maili native Apple Mail.app'te açar (örn. Bugün triyaj satırından).
+    /// Message-ID yoksa hata gösterir. Yalnız açar — hiçbir şey göndermez/yazmaz.
+    func openInMail(messageID: String?) {
+        guard let url = MailLink.appleMailURL(messageID: messageID) else {
             errorMessage = "Bu mailin Message-ID'si kayıtlı değil; Mail'de açılamıyor."
             return
         }
         NSWorkspace.shared.open(url)
     }
 
-    /// Seçili maile yanıt için Mail.app oluşturma penceresi açar: gönderene; konu "Yan: …";
-    /// gövdede sade bir alıntı başlığı. Yalnız pencere açar — hiçbir şey göndermez/yazmaz.
+    /// Seçili maile yanıt için Mail.app oluşturma penceresi açar.
     func composeReply() {
-        guard let hit = selectedHit, let address = hit.fromAddress, !address.isEmpty else {
+        guard let hit = selectedHit else {
+            errorMessage = "Bu mailin gönderen adresi yok; yanıt penceresi açılamıyor."
+            return
+        }
+        composeReply(hit)
+    }
+
+    /// Verilen mail öğesine yanıt için Mail.app oluşturma penceresi açar: gönderene; konu "Yan: …";
+    /// gövdede sade bir alıntı başlığı. Yalnız pencere açar — hiçbir şey göndermez/yazmaz.
+    func composeReply(_ hit: SearchHit) {
+        guard let address = hit.fromAddress, !address.isEmpty else {
             errorMessage = "Bu mailin gönderen adresi yok; yanıt penceresi açılamıyor."
             return
         }
