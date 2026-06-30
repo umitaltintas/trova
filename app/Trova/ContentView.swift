@@ -1110,6 +1110,7 @@ private struct PeopleColumn: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        @Bindable var model = model
         VStack(alignment: .leading, spacing: 0) {
             if let address = model.selectedPersonAddress {
                 PersonDetailHeader(address: address)
@@ -1117,6 +1118,22 @@ private struct PeopleColumn: View {
                 personMails
             } else {
                 header
+                // Liste görünümünde ada/adrese göre canlı süzme (kişi detayındayken gizli).
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
+                    TextField("Kişi ara (ad/adres)…", text: $model.peopleQuery)
+                        .textFieldStyle(.plain).font(.system(size: 14))
+                        .onSubmit { model.loadPeople() }
+                    if !model.peopleQuery.isEmpty {
+                        Button { model.peopleQuery = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.faint)
+                        }
+                        .buttonStyle(.plain).help("Aramayı temizle")
+                    }
+                }
+                .padding(10).cardSurface().padding(.horizontal, 12).padding(.bottom, 12)
+                .onChange(of: model.peopleQuery) { model.loadPeople() }
+
                 Divider().overlay(Theme.line)
                 peopleList
             }
@@ -1140,7 +1157,9 @@ private struct PeopleColumn: View {
     @ViewBuilder
     private var peopleList: some View {
         if model.people.isEmpty {
-            EmptyStateView(content: EmptyStates.people(hasIndex: model.totalCount > 0),
+            EmptyStateView(content: EmptyStates.people(
+                hasIndex: model.totalCount > 0,
+                hasQuery: !model.peopleQuery.trimmingCharacters(in: .whitespaces).isEmpty),
                            action: { model.runIndex() })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

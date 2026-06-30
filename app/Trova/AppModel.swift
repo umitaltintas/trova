@@ -70,6 +70,7 @@ final class AppModel {
 
     // Kişiler (en çok yazışılanlar)
     var people: [SenderStat] = []
+    var peopleQuery = ""                  // ada/adrese göre süzme (boşken en-çok-yazışılanlar)
     var selectedPersonAddress: String?
     var personMails: [SearchHit] = []
     var personDetail: SenderDetail?      // seçili kişinin mini analitiği
@@ -695,10 +696,13 @@ final class AppModel {
     }
 
     /// En çok yazışılan kişileri arka planda tazeler ("Kişiler" görünümü için).
+    /// `peopleQuery` doluysa ada/adrese göre süzer; boşken en-çok-yazışılanları gösterir.
     func loadPeople() {
+        let q = peopleQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             guard let list = await background({
-                try IndexStore(path: AppPaths.databaseURL).topSenders(limit: 60)
+                try IndexStore(path: AppPaths.databaseURL)
+                    .topSenders(matching: q.isEmpty ? nil : q, limit: 60)
             }) else { return }
             people = list
         }

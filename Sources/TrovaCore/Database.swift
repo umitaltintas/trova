@@ -951,12 +951,24 @@ public final class IndexStore: Sendable {
     /// En çok mail ALDIĞIN kişiler (gönderen adresine göre). Gönderilenler/çöp gibi kutular
     /// (isActionableMailbox=false) hariç tutulur ki kendi adresin listeyi kirletmesin.
     /// Adres küçük harfle gruplanır; temsilci görünen ad ilk dolu addan alınır.
-    public func topSenders(limit: Int) throws -> [SenderStat] {
+    ///
+    /// `matching` doluysa, gruplamadan ÖNCE ad ya da adres parçasına göre süzülür
+    /// (`fromName`/`fromAddress` üzerinde `%q%` LIKE, harf duyarsız; LIKE özel karakterleri
+    /// `% _ \` literal aranır). `matching` nil/boş → süzme yok, mevcut davranış birebir korunur.
+    /// isActionableMailbox dışlaması her iki durumda da geçerlidir.
+    public func topSenders(matching: String? = nil, limit: Int) throws -> [SenderStat] {
+        var sql = """
+            SELECT fromName AS n, fromAddress AS a, mailbox AS m
+            FROM message WHERE fromAddress IS NOT NULL AND fromAddress <> ''
+            """
+        var args: [any DatabaseValueConvertible] = []
+        if let q = matching?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty {
+            sql += " AND (fromName LIKE ? ESCAPE '\\' OR fromAddress LIKE ? ESCAPE '\\')"
+            let like = "%\(Self.escapeLikePattern(q))%"
+            args.append(like); args.append(like)
+        }
         let rows = try dbQueue.read { db in
-            try Row.fetchAll(db, sql: """
-                SELECT fromName AS n, fromAddress AS a, mailbox AS m
-                FROM message WHERE fromAddress IS NOT NULL AND fromAddress <> ''
-                """)
+            try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
         }
         var counts: [String: (name: String?, address: String, count: Int)] = [:]
         for row in rows {
@@ -978,6 +990,14 @@ public final class IndexStore: Sendable {
             .sorted { $0.count > $1.count }
             .prefix(limit)
             .map { SenderStat(name: $0.name, address: $0.address, count: $0.count) }
+    }
+
+    /// LIKE özel karakterlerini (`\` `%` `_`) kaçışlar; `ESCAPE '\'` ile birlikte kullanılınca
+    /// kullanıcı girdisi literal aranır (joker olarak yorumlanmaz). Önce `\` kaçışlanmalı.
+    static func escapeLikePattern(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "%", with: "\\%")
+         .replacingOccurrences(of: "_", with: "\\_")
     }
 
     // MARK: - Proaktif asistan / triyaj (Faz 7)

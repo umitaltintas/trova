@@ -96,9 +96,17 @@ public enum EmptyStates {
     }
 
     /// Kişiler: indeks yok → indeksleme daveti; var ama veri yok → açıklayıcı mesaj.
-    public static func people(hasIndex: Bool) -> EmptyStateContent {
+    public static func people(hasIndex: Bool, hasQuery: Bool = false) -> EmptyStateContent {
         if !hasIndex {
             return indexInvite("En çok yazıştığın kişileri çıkarmak için önce postanı indeksle.")
+        }
+        if hasQuery {
+            // Arama aktif ama eşleşen kişi yok.
+            return EmptyStateContent(
+                systemImage: "person.crop.circle.badge.questionmark",
+                title: "Eşleşen kişi yok",
+                message: "Bu ada ya da adrese uyan kişi bulunamadı. Aramayı kısalt ya da temizle.",
+                actionLabel: nil)
         }
         return EmptyStateContent(
             systemImage: "person.2",
