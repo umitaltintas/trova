@@ -52,6 +52,40 @@ final class IndexStoreTests: XCTestCase {
         XCTAssertTrue(try store.search(query: "ilk gövde", limit: 10).isEmpty)  // FTS de güncellendi
     }
 
+    /// upsert, yalnız gerçekten yeni (var olmayan id) satırların sayısını döndürür → "N yeni mail".
+    func testUpsertReturnsNewlyInsertedCount() throws {
+        let store = try makeStore()
+        // Boş DB'ye N yeni mail → hepsi yeni.
+        let inserted = try store.upsert([
+            record(id: "1", subject: "a", body: "x"),
+            record(id: "2", subject: "b", body: "y"),
+            record(id: "3", subject: "c", body: "z"),
+        ])
+        XCTAssertEqual(inserted, 3)
+
+        // Aynı kayıtları (değişmeden) tekrar yaz → hiçbiri yeni değil.
+        let again = try store.upsert([
+            record(id: "1", subject: "a", body: "x"),
+            record(id: "2", subject: "b", body: "y"),
+        ])
+        XCTAssertEqual(again, 0)
+
+        // Var olan bir kayıt değişirse: yeni sayılmaz (0) ama satır güncellenir.
+        let changed = try store.upsert([record(id: "1", subject: "a2", body: "güncel gövde")])
+        XCTAssertEqual(changed, 0)
+        XCTAssertEqual(try store.count(), 3)  // hâlâ 3 satır
+        XCTAssertEqual(try store.search(query: "güncel", limit: 10).first?.id, "1")
+
+        // Karışık parti: 2 var + 2 yeni → yalnız 2 yeni sayılır.
+        let mixed = try store.upsert([
+            record(id: "2", subject: "b", body: "y"),
+            record(id: "4", subject: "d", body: "w"),
+            record(id: "3", subject: "c", body: "z"),
+            record(id: "5", subject: "e", body: "v"),
+        ])
+        XCTAssertEqual(mixed, 2)
+    }
+
     func testAccountCounts() throws {
         let store = try makeStore()
         try store.upsert([

@@ -6,6 +6,9 @@ public struct IndexResult: Sendable {
     public var indexed = 0
     public var skipped = 0
     public var failed = 0
+    /// Bu çalışmada DB'ye ilk kez eklenen (daha önce var olmayan) mesaj satırı sayısı.
+    /// "N yeni mail" göstergesi bundan beslenir; güncellenen satırlar bu sayıya dahil değildir.
+    public var inserted = 0
 }
 
 /// Uzun işlemleri iş parçacıkları arası güvenli biçimde iptal etmek için bayrak.
@@ -94,12 +97,12 @@ public enum Indexer {
             }
 
             if batch.count >= batchSize {
-                try store.upsert(batch)
+                result.inserted += try store.upsert(batch)
                 batch.removeAll(keepingCapacity: true)
                 progress?(result.processed, total)
             }
         }
-        if !batch.isEmpty { try store.upsert(batch) }
+        if !batch.isEmpty { result.inserted += try store.upsert(batch) }
         progress?(result.processed, total)
         return result
     }

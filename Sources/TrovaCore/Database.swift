@@ -313,11 +313,20 @@ public final class IndexStore: Sendable {
     }
 
     /// Kayıtları ekler/günceller (PK çakışmasında satırı değiştirir → FTS tetikleyicileri çalışır).
-    public func upsert(_ records: [MessageRecord]) throws {
+    /// Dönüş: gerçekten YENİ eklenen (daha önce var olmayan id) satır sayısı — "N yeni mail" için.
+    @discardableResult
+    public func upsert(_ records: [MessageRecord]) throws -> Int {
         try dbQueue.write { db in
+            var inserted = 0
             for record in records {
+                // INSERT öncesi var-mı kontrolü: id yoksa bu yeni bir mail satırı, varsa güncelleme.
+                let exists = try Bool.fetchOne(
+                    db, sql: "SELECT EXISTS(SELECT 1 FROM message WHERE id = ?)",
+                    arguments: [record.id]) ?? false
+                if !exists { inserted += 1 }
                 try record.insert(db, onConflict: .replace)
             }
+            return inserted
         }
     }
 

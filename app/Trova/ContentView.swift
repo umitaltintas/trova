@@ -204,6 +204,9 @@ private struct StatusBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if model.newMailCount > 0 {
+                NewMailBadge(count: model.newMailCount) { model.clearNewMail() }
+            }
             if model.hasAccess {
                 StatRow(icon: "envelope.fill", label: "Mail", value: model.totalCount.formatted())
                 StatRow(icon: "circle.hexagongrid.fill", label: "Vektör", value: model.vectorCount.formatted())
@@ -242,6 +245,30 @@ private struct StatusBlock: View {
         }
         .padding(10)
         .cardSurface()
+    }
+}
+
+/// "N yeni mail" rozeti: autoSync açıkken yeni mail geldiğinde StatusBlock'ta belirir.
+/// Tıklanınca sayacı sıfırlar ve açık görünümü tazeler; sayı 0 iken hiç gösterilmez (çağıran kontrol eder).
+private struct NewMailBadge: View {
+    let count: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles").font(.system(size: 10, weight: .semibold))
+                Text("\(count) yeni mail").font(.rounded(12, .semibold))
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.clockwise").font(.system(size: 9))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            .background(Theme.accent, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Yeni gelen mailleri gör ve görünümü tazele")
     }
 }
 

@@ -142,6 +142,10 @@ final class AppModel {
     var digestText = ""
     var isDigesting = false
 
+    // Yeni mail göstergesi (FSEvents canlı tazeleme): autoSync açıkken artımlı reindex bitince
+    // eklenen mail sayısı burada birikir; kullanıcı rozete dokununca (clearNewMail) sıfırlanır.
+    var newMailCount = 0
+
     // Uzun işler
     var busy = false
     var progress = ""
@@ -151,6 +155,11 @@ final class AppModel {
     private var currentTask: Task<Void, Never>?
     private var cancelFlag: CancellationFlag?
     private var watcher: MailWatcher?
+
+    // FSEvents akışını birleştirme (debounce) durumu — yalnız autoSync açıkken kullanılır.
+    private let refreshCoalescer = RefreshCoalescer(window: 2)
+    private var fsEventTimes: [Date] = []     // henüz tetiklenmemiş FS olaylarının zaman damgaları
+    private var lastReindexFired: Date?       // son birleştirilmiş reindex tetiği
 
     init() {
         // Otomatik arama geçmişini kalıcı depodan yükle.
@@ -230,12 +239,88 @@ final class AppModel {
     private func stopWatching() {
         watcher?.stop()
         watcher = nil
+        // autoSync kapanınca canlı-tazeleme durumu sıfırlanır ve rozet temizlenir (devre dışı davranış).
+        fsEventTimes.removeAll()
+        lastReindexFired = nil
+        newMailCount = 0
     }
 
+    /// FSEvents'ten gelen her değişiklik bildirimini kaydeder ve birleştirme (debounce) kontrolünü planlar.
     private func onMailChanged() {
-        guard !busy else { return }
+        fsEventTimes.append(Date())
+        scheduleCoalescedReindex()
+    }
+
+    /// Sessizlik penceresi kadar bekleyip RefreshCoalescer kararına göre birleştirilmiş reindex tetikler.
+    /// Pencere içinde gelen birden çok olay tek bir tetiğe iner; tetik sonrası eski kontroller etkisizdir.
+    private func scheduleCoalescedReindex() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(refreshCoalescer.window))
+            let now = Date()
+            guard refreshCoalescer.shouldFire(events: fsEventTimes, now: now, lastFired: lastReindexFired)
+            else { return }
+            lastReindexFired = now
+            fsEventTimes.removeAll()
+            runAutoReindex()
+        }
+    }
+
+    /// autoSync: birleştirilmiş FS olayı sonrası artımlı reindex. Bitince yeni-mail sayacını ekler ve
+    /// (kullanıcı meşgul değilse) görünür görünümü sessizce tazeler. Manuel iş sürerken çakışmaz.
+    private func runAutoReindex() {
+        guard !busy else { return }   // manuel indeksle/gömme sürüyorsa bu turu atla
+        busy = true; errorMessage = nil; jobProcessed = 0; jobTotal = 0
         progress = "Yeni mail algılandı, güncelleniyor…"
-        runIndex()
+        let flag = CancellationFlag(); cancelFlag = flag
+        currentTask = Task {
+            let result = await background { () -> IndexResult in
+                guard let root = MailStore.locate() else { throw AppError.noMailStore }
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                return try Indexer.run(store: store, root: root, cancel: flag) { processed, total in
+                    Task { @MainActor in
+                        self.jobProcessed = processed; self.jobTotal = total
+                        self.progress = "İndeksleniyor \(processed)/\(total)"
+                    }
+                }
+            }
+            // Meşguliyet bayraklarını ÖNCE sıfırla ki görünür tazeleme (busy kontrolü) çalışabilsin.
+            busy = false; currentTask = nil; cancelFlag = nil
+            refreshStatus()
+            guard let result else { return }
+            progress = result.processed > 0
+                ? "\(result.indexed) yeni · \(result.skipped) atlandı · \(result.failed) hata"
+                : "Mail bulunamadı"
+            // Yeni eklenen mailleri kullanıcı rozete dokunana dek biriktir.
+            if result.inserted > 0 { newMailCount += result.inserted }
+            refreshVisibleSection()
+        }
+    }
+
+    /// Kullanıcıyı bölmeden açık bölümü sessizce tazeler — yalnız aktif bir iş (soru/arama/indeksleme/
+    /// özet/brifing) yokken. Aktifse görünüme dokunmaz; rozet+sayı zaten ayrıca güncellenir.
+    private func refreshVisibleSection() {
+        guard !isAsking, !isSearching, !isDigesting, !isSummarizing, !busy else { return }
+        switch section {
+        case .search:
+            // Yalnız anlamlı bir sorgu/filtre varsa mevcut aramayı sessizce yeniden çalıştır.
+            let hasQuery = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if hasQuery || unreadOnly || flaggedOnly { runSearch() }
+        case .digest:
+            loadTriage()              // triyaj listeleri (LLM brifingine dokunmadan)
+        case .insights:
+            loadInsights()
+        case .people:
+            loadPeople()
+            if let address = selectedPersonAddress { selectPerson(address) }
+        case .ask:
+            break                     // açık sohbeti elleme
+        }
+    }
+
+    /// "N yeni mail" rozetine dokununca: sayacı sıfırlar ve açık görünümü tazeler.
+    func clearNewMail() {
+        newMailCount = 0
+        refreshVisibleSection()
     }
 
     func onAppear() {
