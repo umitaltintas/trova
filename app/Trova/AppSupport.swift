@@ -49,6 +49,7 @@ enum SettingsKeys {
     static let reranking = "reranking"           // AI ile sonuçları yeniden sırala (varsayılan kapalı)
     static let verify = "verify"                  // Yanıt doğrulama / self-critique (varsayılan kapalı)
     static let diversify = "diversify"            // Sonuçları thread bazında çeşitlendir (varsayılan açık)
+    static let queryExpansion = "queryExpansion"  // PRF sorgu genişletme (varsayılan kapalı)
 }
 
 /// Çeşitlendirme ayarından thread başına izin verilen sonuç sayısını verir.

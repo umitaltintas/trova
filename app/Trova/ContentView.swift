@@ -319,11 +319,13 @@ private struct SearchColumn: View {
             }
             .padding(10).cardSurface().padding(.horizontal, 12).padding(.top, 12)
 
-            if model.detectedDateLabel != nil || model.searchFromLabel != nil || model.searchHasAttachment {
+            if model.detectedDateLabel != nil || model.searchFromLabel != nil
+                || model.searchHasAttachment || !model.expansionChips.isEmpty {
                 HStack(spacing: 6) {
                     if let label = model.detectedDateLabel { Chip(text: label, systemImage: "calendar") }
                     if let from = model.searchFromLabel { Chip(text: from, systemImage: "person") }
                     if model.searchHasAttachment { Chip(text: "ekli", systemImage: "paperclip") }
+                    ForEach(model.expansionChips, id: \.self) { Chip(text: "+\($0)", systemImage: "plus.magnifyingglass") }
                     Spacer()
                 }
                 .padding(.horizontal, 14).padding(.top, 8)

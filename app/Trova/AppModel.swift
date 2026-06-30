@@ -114,6 +114,7 @@ final class AppModel {
     var detectedDateLabel: String?       // sorgudan algılanan Türkçe tarih ifadesi etiketi (örn. "son 7 gün")
     var searchFromLabel: String?         // from:/gönderen: operatörü etiketi
     var searchHasAttachment = false      // has:attachment operatörü etkin mi
+    var expansionChips: [String] = []    // PRF ile sorguya eklenen terimler (gösterim)
 
     // Filtre
     var filterAccount = ""          // "" → tüm hesaplar (accountID)
@@ -440,23 +441,36 @@ final class AppModel {
         let filter = SearchFilter(
             accountID: filterAccount.isEmpty ? nil : filterAccount, since: since, until: until,
             fromContains: ops.fromContains, hasAttachment: ops.hasAttachment)
-        isSearching = true; errorMessage = nil
+        // PRF (sorgu genişletme) ayarı: açıksa ilk sonuçlardan terim çıkarıp sorguya eklenir.
+        let prf = UserDefaults.standard.bool(forKey: SettingsKeys.queryExpansion)
+        isSearching = true; errorMessage = nil; expansionChips = []
         Task {
-            let hits = await background { () -> [SearchHit] in
+            let outcome = await background { () -> (hits: [SearchHit], terms: [String]) in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 // Arama metni kalmadıysa (yalnız operatör/tarih) filtreye uyanları listele.
                 if q.isEmpty {
-                    return try store.browse(filter, limit: 50)
+                    return (try store.browse(filter, limit: 50), [])
+                }
+                // PRF: ilk FTS sonuçlarının metinlerinden genişletme terimleri türet.
+                var effectiveQuery = q
+                var terms: [String] = []
+                if prf {
+                    let initial = try store.search(query: q, filter: filter, limit: 8)
+                    let docs = initial.map { ($0.subject ?? "") + " " + $0.snippet }
+                    terms = QueryExpander.expansionTerms(query: q, docs: docs, maxTerms: 4)
+                    if !terms.isEmpty { effectiveQuery = q + " " + terms.joined(separator: " ") }
                 }
                 let embedder = selectedMode == .fts ? nil : Providers.embedder()
                 // Reranking yalnızca anlamsal/hibrit modlarda anlamlıdır.
                 let reranker = selectedMode == .fts ? nil : Providers.reranker()
-                return try Searcher(store: store, embedder: embedder, reranker: reranker,
-                                    maxPerThread: Retrieval.maxPerThread())
-                    .search(q, mode: selectedMode, filter: filter, limit: 50)
+                let hits = try Searcher(store: store, embedder: embedder, reranker: reranker,
+                                        maxPerThread: Retrieval.maxPerThread())
+                    .search(effectiveQuery, mode: selectedMode, filter: filter, limit: 50)
+                return (hits, terms)
             }
             isSearching = false
-            results = hits ?? []
+            results = outcome?.hits ?? []
+            expansionChips = outcome?.terms ?? []
             selection = results.first?.id
             loadSelected()
         }

@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKeys.reranking) private var reranking = false
     @AppStorage(SettingsKeys.verify) private var verify = false
     @AppStorage(SettingsKeys.diversify) private var diversify = true
+    @AppStorage(SettingsKeys.queryExpansion) private var queryExpansion = false
 
     @Environment(AppModel.self) private var model
 
@@ -64,6 +65,11 @@ struct SettingsView: View {
                 Toggle("Sonuçları çeşitlendir", isOn: $diversify)
                 Text("Aynı konuşmanın çok sayıda benzer mesajının üst sıraları tıkamasını önler; "
                    + "thread başına en çok \(Retrieval.perThread) sonuç gösterip farklı konuşmaları öne çıkarır.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("Sorgu genişletme (PRF)", isOn: $queryExpansion)
+                Text("İlk sonuçların sık terimlerini sorguya ekleyerek kelime dağarcığı boşluklarını "
+                   + "kapatır (recall artar). Eklenen terimler arama üstünde çip olarak gösterilir.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 Divider()
