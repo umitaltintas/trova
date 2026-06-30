@@ -1,4 +1,5 @@
 import SwiftUI
+import TrovaCore
 
 /// Embedding ve LLM sağlayıcı ayarları. Anahtarlar Keychain'de saklanır.
 struct SettingsView: View {
@@ -54,6 +55,9 @@ struct SettingsView: View {
                 Text("Örn. anthropic/claude-sonnet-4.6, openai/gpt-4o-mini. "
                    + "Anahtar Keychain'de saklanır.")
                     .font(.caption).foregroundStyle(.secondary)
+
+                ConnectionTestSection()
+
                 Toggle("AI yeniden sıralama (reranking)", isOn: $reranking)
                 Text("Sonuçları LLM ile yeniden sıralar: ek bir model çağrısı maliyeti getirir "
                    + "ama sıralama kalitesini artırır.")
@@ -174,6 +178,46 @@ struct SettingsView: View {
             .onAppear { model.refreshStatus() }
         }
         .frame(width: 480, height: 460)
+    }
+}
+
+/// "Bağlantıyı test et" bölümü: yapılandırılmış LLM/embedding sağlayıcısına canlı istek atıp
+/// gerçek sonucu (✓ çalışıyor / ✗ geçersiz anahtar · model yok · ağ hatası) satır satır gösterir.
+private struct ConnectionTestSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Button {
+            model.testConnection()
+        } label: {
+            if model.isTestingConnection {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Test ediliyor…")
+                }
+            } else {
+                Label("Bağlantıyı test et", systemImage: "bolt.horizontal.circle")
+            }
+        }
+        .disabled(model.isTestingConnection)
+
+        if !model.connectionResults.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(model.connectionResults, id: \.service) { result in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: result.status == .ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(result.status == .ok ? Color.green : Color.red)
+                        Text(result.detail)
+                            .font(.caption).foregroundStyle(Theme.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
+
+        Text("Yapılandırılmış sağlayıcılara minik birer canlı istek atar; gerçek sonucu gösterir.")
+            .font(.caption).foregroundStyle(.secondary)
     }
 }
 

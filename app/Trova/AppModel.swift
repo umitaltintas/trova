@@ -92,6 +92,10 @@ final class AppModel {
     var usesLocalEmbedder = false
     var statusLoaded = false        // ilk durum yüklemesi bitti mi (kurulum kapısı yanıp sönmesin)
 
+    // Bağlantı testi (Ayarlar → AI): yapılandırılmış LLM/embedding sağlayıcılarına canlı istek sonuçları.
+    var connectionResults: [ConnectionResult] = []
+    var isTestingConnection = false
+
     /// Canlı kurulum durumundan teşhis raporu üretir (saf — yalnız depolanmış bayrakları okur).
     var health: HealthReport {
         HealthCheck.evaluate(HealthInput(
@@ -469,6 +473,57 @@ final class AppModel {
         case "openai", "voyage": embedderConfigured = !embedKey.isEmpty
         case "openrouter":       embedderConfigured = !(embedKey.isEmpty && llmKey.isEmpty)
         default:                 embedderConfigured = true   // yerel her zaman kullanılabilir
+        }
+    }
+
+    /// Ayarlardan canlı bağlantı testi: yapılandırılmış LLM ve embedding sağlayıcısına minik birer
+    /// istek (LLM "ping" sohbeti, embedder kısa metin gömme) atıp gerçek sonucu toplar. HTTP durumu
+    /// hata tipinden/mesajından çıkarılıp `ConnectionTest` ile Türkçe sonuca (✓/✗) çevrilir.
+    /// Anahtar yoksa o servis "yapılandırılmamış" olarak işaretlenir (istek atılmaz).
+    func testConnection() {
+        guard !isTestingConnection else { return }
+        isTestingConnection = true
+        connectionResults = []
+        let llm = Providers.llm()
+        let embedder = Providers.embedder()
+        let usesLocal = (UserDefaults.standard.string(forKey: SettingsKeys.embedProvider) ?? "local") == "local"
+        Task {
+            defer { isTestingConnection = false }
+            var results: [ConnectionResult] = []
+
+            // 1) LLM — kısa bir "ping" sohbeti at.
+            if let llm {
+                results.append(await Task.detached(priority: .userInitiated) {
+                    do {
+                        _ = try llm.complete(messages: [ChatMessage(role: "user", content: "ping")],
+                                             temperature: 0)
+                        return ConnectionTest.result(service: "LLM", error: nil)
+                    } catch {
+                        return ConnectionTest.result(service: "LLM", error: error)
+                    }
+                }.value)
+            } else {
+                results.append(ConnectionResult(service: "LLM", status: .unknown,
+                    detail: "LLM: Yapılandırılmamış (Ayarlar'dan OpenRouter anahtarı ekleyin)"))
+            }
+
+            // 2) Embedding — kısa bir metni göm (yerelde offline doğrulama, API'de canlı istek).
+            let embedService = usesLocal ? "Embedding (yerel)" : "Embedding"
+            if let embedder {
+                results.append(await Task.detached(priority: .userInitiated) {
+                    do {
+                        _ = try embedder.embed("ping")
+                        return ConnectionTest.result(service: embedService, error: nil)
+                    } catch {
+                        return ConnectionTest.result(service: embedService, error: error)
+                    }
+                }.value)
+            } else {
+                results.append(ConnectionResult(service: embedService, status: .unknown,
+                    detail: "\(embedService): Yapılandırılmamış"))
+            }
+
+            connectionResults = results
         }
     }
 
