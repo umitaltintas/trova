@@ -8,7 +8,9 @@ struct TrovaApp: App {
         WindowGroup {
             ContentView()
                 .environment(model)
-                .frame(minWidth: 980, minHeight: 620)
+                // Pencere min boyutu küçültüldü: küçük ekranlarda da içerik kırpılmadan
+                // yeniden akar (kolon min'leri + sarmalayan düğme/çip satırları sayesinde).
+                .frame(minWidth: 900, minHeight: 600)
         }
         .defaultSize(width: 1200, height: 780)
 

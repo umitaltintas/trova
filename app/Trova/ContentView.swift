@@ -10,7 +10,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             Sidebar(autoSync: $autoSync)
-                .navigationSplitViewColumnWidth(min: 204, ideal: 224, max: 280)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 224, max: 280)
         } content: {
             Group {
                 if model.shouldShowSetup { SetupView() }
@@ -21,10 +21,11 @@ struct ContentView: View {
                 else if model.section == .attachments { AttachmentsColumn() }
                 else { SearchColumn() }
             }
-            .navigationSplitViewColumnWidth(min: 340, ideal: 440)
+            // Kolon min'leri düşürüldü ki dar pencerede içerik sarmalanıp akabilsin (kırpılmasın).
+            .navigationSplitViewColumnWidth(min: 320, ideal: 440)
         } detail: {
             ReadingPane()
-                .navigationSplitViewColumnWidth(min: 360, ideal: 480)
+                .navigationSplitViewColumnWidth(min: 340, ideal: 480)
         }
         .task { model.onAppear(); if autoSync { model.setAutoSync(true) } }
         .onChange(of: scenePhase) { _, phase in
@@ -369,7 +370,8 @@ private struct SearchColumn: View {
             if model.detectedDateLabel != nil || model.searchFromLabel != nil
                 || model.searchHasAttachment || model.searchAttachmentKind != nil
                 || !model.expansionChips.isEmpty {
-                HStack(spacing: 6) {
+                // Algılanan filtre + sorgu-genişletme çipleri; çok sayıda olunca alt satıra sarar.
+                FlowLayout(spacing: 6, lineSpacing: 6) {
                     if let label = model.detectedDateLabel { Chip(text: label, systemImage: "calendar") }
                     if let from = model.searchFromLabel { Chip(text: from, systemImage: "person") }
                     if model.searchHasAttachment { Chip(text: "ekli", systemImage: "paperclip") }
@@ -377,8 +379,8 @@ private struct SearchColumn: View {
                         Chip(text: "Ek türü: \(kind.label)", systemImage: kind.systemImage)
                     }
                     ForEach(model.expansionChips, id: \.self) { Chip(text: "+\($0)", systemImage: "plus.magnifyingglass") }
-                    Spacer()
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14).padding(.top, 8)
             }
 
@@ -1080,7 +1082,8 @@ private struct PersonDetailHeader: View {
             }
 
             if let detail = model.personDetail {
-                HStack(spacing: 6) {
+                // İstatistik çipleri dar kişi panosunda taşmasın diye sarmalanır.
+                FlowLayout(spacing: 6, lineSpacing: 6) {
                     Chip(text: "\(detail.total) mail", systemImage: "envelope")
                     if detail.withAttachments > 0 {
                         Chip(text: "\(detail.withAttachments) ekli", systemImage: "paperclip")
@@ -1091,8 +1094,8 @@ private struct PersonDetailHeader: View {
                              systemImage: "calendar")
                             .help("\(RelativeTime.absolute(first)) – \(RelativeTime.absolute(last))")
                     }
-                    Spacer()
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(14)
@@ -1320,10 +1323,13 @@ private struct ReadingPane: View {
                     HStack(spacing: 10) {
                         Avatar(name: hit.fromName, email: hit.fromAddress, size: 36)
                         VStack(alignment: .leading, spacing: 1) {
+                            // Uzun ad/adres pencere genişliğini zorlamasın: tek satır + kuyruktan kırp.
                             Text(hit.fromName ?? hit.fromAddress ?? "—")
                                 .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
+                                .lineLimit(1).truncationMode(.tail)
                             if let address = hit.fromAddress, hit.fromName != nil {
                                 Text(address).font(.system(size: 11)).foregroundStyle(Theme.muted)
+                                    .lineLimit(1).truncationMode(.middle)
                             }
                         }
                         Spacer()
@@ -1335,7 +1341,8 @@ private struct ReadingPane: View {
                                 .accessibilityLabel("Tarih: \(RelativeTime.absolute(date))")
                         }
                     }
-                    HStack(spacing: 6) {
+                    // Üst-veri çipleri (kutu + ekler) dar okuma panosunda taşmasın diye sarmalanır.
+                    FlowLayout(spacing: 6, lineSpacing: 6) {
                         Chip(text: hit.mailbox, systemImage: "tray")
                         ForEach(hit.attachments, id: \.self) { name in
                             Button { model.openAttachment(named: name) } label: {
@@ -1343,7 +1350,12 @@ private struct ReadingPane: View {
                             }
                             .buttonStyle(.plain).help("Eki aç")
                         }
-                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Eylem düğmeleri de sarmalanır: pano daralınca düğmeler ekran dışında
+                    // kalıp kırpılmaz, otomatik olarak bir alt satıra geçer.
+                    FlowLayout(spacing: 8, lineSpacing: 8) {
                         Button {
                             Exporter.copy(MarkdownExporter.email(hit, body: model.selectedBody))
                         } label: {
@@ -1376,6 +1388,7 @@ private struct ReadingPane: View {
                             .pickerStyle(.segmented).labelsHidden().frame(width: 140).controlSize(.small)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(16)
 

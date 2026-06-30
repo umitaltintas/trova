@@ -86,7 +86,8 @@ struct Chip: View {
     var body: some View {
         HStack(spacing: 4) {
             if let systemImage { Image(systemName: systemImage).font(.system(size: 9)) }
-            Text(text).font(.system(size: 11))
+            // Tek satırda kal: uzun dosya adı/etiket çipi dikey büyüyüp satırı bozmasın.
+            Text(text).font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
         }
         .foregroundStyle(Theme.muted)
         .padding(.horizontal, 7).padding(.vertical, 3)
@@ -125,7 +126,7 @@ struct FilterToggleChip: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Image(systemName: systemImage).font(.system(size: 9))
-                Text(text).font(.system(size: 11))
+                Text(text).font(.system(size: 11)).lineLimit(1)
             }
             .foregroundStyle(isOn ? .white : Theme.muted)
             .padding(.horizontal, 8).padding(.vertical, 3)
