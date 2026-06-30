@@ -7,7 +7,8 @@ struct Trova: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "trova",
         abstract: "Apple Mail yerel deposunu indeksler ve arar.",
-        subcommands: [Doctor.self, Index.self, Embed.self, Search.self, Ask.self, Agent.self, Accounts.self],
+        subcommands: [Doctor.self, Index.self, Embed.self, Search.self, Ask.self, Agent.self,
+                      Accounts.self, Count.self, Attachments.self, Pinned.self],
         defaultSubcommand: Doctor.self)
 }
 
@@ -217,6 +218,94 @@ extension Trova {
             let counts = try store.accountCounts()
             guard !counts.isEmpty else { print("Henüz kayıt yok. `trova index` çalıştırın."); return }
             for entry in counts { print("\(entry.count)\t\(entry.account)") }
+        }
+    }
+
+    struct Count: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Sorguya uyan mail SAYISINI yazar (operatör + Türkçe tarih ayrıştırılır).")
+        @Argument(help: "Arama sorgusu (boş bırakılırsa tüm mailler sayılır).") var query: [String] = []
+        @Option(name: .long, help: "Veritabanı yolu.") var db: String?
+
+        func run() throws {
+            let store = try resolveStore(db)
+            let q = query.joined(separator: " ")
+            // `search` ile aynı ayrıştırma: Gmail-tarzı operatör → Türkçe tarih → FTS metni + filtre.
+            let plan = SearchPlanner.plan(q, now: Date())
+            let n = try store.countMatching(query: plan.ftsQuery, filter: plan.filter)
+            print("\(n) mail")
+        }
+    }
+
+    struct Attachments: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Ekleri listeler: ada, türe (--kind) ve göndericiye (--from) göre süzülür.")
+        @Argument(help: "Ek dosya adında aranacak parça (opsiyonel).") var name: [String] = []
+        @Option(name: .long, help: "Ek türü: pdf, görsel, tablo, belge, sunum, arşiv, ses, video, kod.")
+        var kind: String?
+        @Option(name: .long, help: "Gönderen adı/e-postasında geçen metin.") var from: String?
+        @Option(name: .long, help: "Azami sonuç sayısı.") var limit: Int = 50
+        @Option(name: .long, help: "Veritabanı yolu.") var db: String?
+
+        func run() throws {
+            let store = try resolveStore(db)
+            // --kind: app/operatör ile AYNI Türkçe-duyarlı eşleme (tek kaynak: SearchOperatorParser).
+            var attachmentKind: AttachmentKind?
+            if let kind {
+                guard let parsed = SearchOperatorParser.attachmentKind(forTerm: kind) else {
+                    throw ValidationError(
+                        "Bilinmeyen ek türü: \(kind). Geçerli türler: pdf, görsel, tablo, belge, sunum, arşiv, ses, video, kod.")
+                }
+                attachmentKind = parsed
+            }
+            let q = name.joined(separator: " ")
+            // --from POST-FİLTRE (ToolAgent.findAttachments deseni): `allAttachments` gönderen süzgeci
+            // sunmadığından önce geniş bir havuz çekilir, gönderen süzülür, sonra `limit`'e indirilir.
+            let hasFrom = !(from?.isEmpty ?? true)
+            let fetchLimit = hasFrom ? max(limit, 500) : limit
+            var rows = try store.allAttachments(query: q.isEmpty ? nil : q,
+                                                kind: attachmentKind, limit: fetchLimit)
+            if hasFrom, let needle = from?.lowercased() {
+                rows = rows.filter {
+                    ($0.fromAddress?.lowercased().contains(needle) ?? false)
+                        || ($0.fromName?.lowercased().contains(needle) ?? false)
+                }
+            }
+            rows = Array(rows.prefix(limit))
+            guard !rows.isEmpty else { print("Ek bulunamadı."); return }
+
+            print("\(rows.count) ek:")
+            for row in rows {
+                let sender = row.fromName ?? row.fromAddress ?? "—"
+                let date = row.date.map { ISO8601DateFormatter().string(from: $0) } ?? "—"
+                print("\(row.fileName) · \(sender) · \(date) · \(row.subject ?? "(konu yok)")")
+            }
+        }
+    }
+
+    struct Pinned: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Trova-yerel yıldızlı (pinned) mailleri listeler.")
+        @Option(name: .long, help: "Veritabanı yolu.") var db: String?
+
+        func run() throws {
+            let store = try resolveStore(db)
+            let count = try store.pinnedCount()
+            guard count > 0 else { print("Yıldızlı mail yok."); return }
+            // `pinnedIDs` yalnız id verir; görüntüleme bilgisi mevcut `hits(forIDs:)` ile çekilir.
+            let hitsByID = try store.hits(forIDs: Array(try store.pinnedIDs()))
+            // En yeni önce (tarihi olmayanlar sona).
+            let hits = hitsByID.values.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
+            print("\(count) yıldızlı mail:")
+            for hit in hits {
+                let sender = hit.fromName ?? hit.fromAddress ?? "—"
+                let subject = hit.subject ?? "(konu yok)"
+                if let date = hit.date {
+                    print("\(sender) · \(subject) (\(ISO8601DateFormatter().string(from: date)))")
+                } else {
+                    print("\(sender) · \(subject)")
+                }
+            }
         }
     }
 }

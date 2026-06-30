@@ -53,7 +53,8 @@ public enum SearchOperatorParser {
 
     /// Bir tür belirtecini (Türkçe/İngilizce eş anlamlılar) ek kategorisine eşler; tanınmazsa nil.
     /// Türkçe küçük harf indirgemesi (İ→i) yapılır; diakritikli ("görsel", "arşiv") biçimler desteklenir.
-    static func attachmentKind(forTerm term: String) -> AttachmentKind? {
+    /// `public`: `trova attachments --kind` da AYNI eşlemeyi kullansın (tek kaynak, app ile tutarlı).
+    public static func attachmentKind(forTerm term: String) -> AttachmentKind? {
         switch term.lowercased(with: Locale(identifier: "tr_TR")) {
         case "pdf":
             return .pdf
