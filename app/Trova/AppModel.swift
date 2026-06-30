@@ -156,6 +156,24 @@ final class AppModel {
             ?? conversation.flatMap(\.cited).first { $0.id == selection }
     }
 
+    /// Açık bölüme göre klavyeyle gezinilebilir aktif mail id listesi (görünen sırayla).
+    var navigableIDs: [String] {
+        switch section {
+        case .search:   results.map(\.id)
+        case .people:   personMails.map(\.id)
+        case .digest:   (needsReply + waitingOn).map(\.id)
+        case .ask:      conversation.flatMap(\.cited).map(\.id)
+        case .insights: []
+        }
+    }
+
+    /// Aktif listede `delta` yönündeki komşu maile geçer ve okuma panelinde açar (uçlarda kenetlenir).
+    func selectAdjacent(_ delta: Int) {
+        guard let next = Navigation.adjacent(ids: navigableIDs, current: selection, delta: delta) else { return }
+        selection = next
+        loadSelected()
+    }
+
     /// Bir tarihin bugüne göre yaşını tam gün olarak verir (UI yaş çipleri için).
     static func ageDays(_ date: Date?) -> Int { TriageItem.ageDays(of: date) }
 

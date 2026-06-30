@@ -49,6 +49,9 @@ private struct KeyboardShortcuts: View {
             Button("") { model.section = .people; model.selectedPersonAddress = nil }
                 .keyboardShortcut("4", modifiers: .command)
             Button("") { model.section = .insights }.keyboardShortcut("5", modifiers: .command)
+            // ⌥↓ / ⌥↑ ile aktif listede sonraki/önceki maile geç.
+            Button("") { model.selectAdjacent(1) }.keyboardShortcut(.downArrow, modifiers: .option)
+            Button("") { model.selectAdjacent(-1) }.keyboardShortcut(.upArrow, modifiers: .option)
         }
         .opacity(0).frame(width: 0, height: 0)
     }
