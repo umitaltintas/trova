@@ -489,8 +489,10 @@ private struct ResultRow: View {
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                     Spacer()
                     if let date = hit.date {
-                        Text(date.formatted(date: .numeric, time: .omitted))
+                        Text(RelativeTime.short(date, now: Date()))
                             .font(.mono(10)).foregroundStyle(Theme.faint)
+                            .help(RelativeTime.absolute(date))
+                            .accessibilityLabel("Tarih: \(RelativeTime.absolute(date))")
                     }
                 }
                 Text(hit.fromName ?? hit.fromAddress ?? "—")
@@ -935,8 +937,6 @@ private struct PersonDetailHeader: View {
 
     private var person: SenderStat? { model.people.first { $0.address == address } }
 
-    private static let dateFormat: Date.FormatStyle = .dateTime.month(.abbreviated).year()
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
@@ -966,8 +966,10 @@ private struct PersonDetailHeader: View {
                         Chip(text: "\(detail.withAttachments) ekli", systemImage: "paperclip")
                     }
                     if let first = detail.firstDate, let last = detail.lastDate {
-                        Chip(text: "\(first.formatted(Self.dateFormat)) – \(last.formatted(Self.dateFormat))",
+                        let now = Date()
+                        Chip(text: "\(RelativeTime.format(first, now: now)) – \(RelativeTime.format(last, now: now))",
                              systemImage: "calendar")
+                            .help("\(RelativeTime.absolute(first)) – \(RelativeTime.absolute(last))")
                     }
                     Spacer()
                 }
@@ -1148,15 +1150,19 @@ private struct TriageRow: View {
     }
 }
 
-/// Mailin yaşını "3g" / "bugün" gibi kısa bir çiple gösterir.
+/// Mailin yaşını "şimdi" / "3g" / "dün" gibi kısa bir çiple gösterir (tek kaynak: RelativeTime).
 private struct AgeChip: View {
     let date: Date?
 
     var body: some View {
-        Text(AppModel.ageLabel(date))
-            .font(.mono(10, .medium)).foregroundStyle(Theme.accent)
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(Theme.accentSoft, in: Capsule())
+        if let date {
+            Text(RelativeTime.short(date, now: Date()))
+                .font(.mono(10, .medium)).foregroundStyle(Theme.accent)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Theme.accentSoft, in: Capsule())
+                .help(RelativeTime.absolute(date))
+                .accessibilityLabel("Yaş: \(RelativeTime.absolute(date))")
+        }
     }
 }
 
@@ -1185,8 +1191,10 @@ private struct ReadingPane: View {
                         Spacer()
                         MessageBadges(isRead: hit.isRead, isFlagged: hit.isFlagged, dotSize: 9)
                         if let date = hit.date {
-                            Text(date.formatted(date: .abbreviated, time: .shortened))
+                            Text(RelativeTime.format(date, now: Date()))
                                 .font(.mono(11)).foregroundStyle(Theme.muted)
+                                .help(RelativeTime.absolute(date))
+                                .accessibilityLabel("Tarih: \(RelativeTime.absolute(date))")
                         }
                     }
                     HStack(spacing: 6) {
@@ -1293,8 +1301,10 @@ private struct ThreadStrip: View {
                                 Text(message.fromName ?? message.fromAddress ?? "—")
                                     .font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
                                 if let date = message.date {
-                                    Text(date.formatted(date: .abbreviated, time: .omitted))
+                                    Text(RelativeTime.short(date, now: Date()))
                                         .font(.mono(9)).foregroundStyle(Theme.muted)
+                                        .help(RelativeTime.absolute(date))
+                                        .accessibilityLabel("Tarih: \(RelativeTime.absolute(date))")
                                 }
                             }
                             .padding(8).frame(width: 132, alignment: .leading)

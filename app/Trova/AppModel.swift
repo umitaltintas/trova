@@ -184,13 +184,11 @@ final class AppModel {
         loadSelected()
     }
 
-    /// Bir tarihin bugüne göre yaşını tam gün olarak verir (UI yaş çipleri için).
-    static func ageDays(_ date: Date?) -> Int { TriageItem.ageDays(of: date) }
-
-    /// Yaşı kısa bir etikete çevirir ("bugün" / "3g") — yaş çipi ve dışa aktarım aynı biçimi paylaşır.
+    /// Yaşı kısa bir etikete çevirir ("şimdi" / "3g" / "dün") — tek kaynak: RelativeTime.
+    /// Tarih yoksa boş döner (dışa aktarımda parantezli yaş bölümü gösterilmez).
     static func ageLabel(_ date: Date?) -> String {
-        let days = ageDays(date)
-        return days <= 0 ? "bugün" : "\(days)g"
+        guard let date else { return "" }
+        return RelativeTime.short(date, now: Date())
     }
 
     /// "Bugün" brifingini (brifing metni + triyaj listeleri) paylaşılabilir Markdown'a döker.
