@@ -785,6 +785,24 @@ extension AttributedString {
         }
         self = attr
     }
+
+    /// Okuma panelinde TAM gövde için: arama terimi aralıklarını Theme accent + yarı-kalın +
+    /// soluk accent arka planla vurgular (iter 25 snippet stiliyle tutarlı). Taban metin rengi
+    /// AYARLANMAZ → çağıran `.foregroundStyle(Theme.ink)` modifikatörü korunur; yalnız vurgular
+    /// renklenir. Ofsetler `TermHighlighter`'dan Character (grafem) birimindedir.
+    init(body text: String, highlights ranges: [HighlightRange], size: CGFloat = 13) {
+        var attr = AttributedString(text)
+        let total = attr.characters.count
+        for r in ranges {
+            guard r.start >= 0, r.length > 0, r.start + r.length <= total else { continue }
+            let lo = attr.index(attr.startIndex, offsetByCharacters: r.start)
+            let hi = attr.index(lo, offsetByCharacters: r.length)
+            attr[lo..<hi].foregroundColor = Theme.accent
+            attr[lo..<hi].backgroundColor = Theme.accentSoft
+            attr[lo..<hi].font = .system(size: size, weight: .semibold)
+        }
+        self = attr
+    }
 }
 
 // MARK: - Sor (AI) sütunu
@@ -1652,6 +1670,27 @@ private struct ReadingPane: View {
             }
     }
 
+    /// Gövde vurgusu yalnız arama bölümünde ve vurgulanacak terim varken etkindir; diğer
+    /// bölümlerde (Sor/Kişiler/Bugün…) boş → hiç vurgu yapılmaz.
+    private var bodyHighlightTerms: [String] {
+        model.section == .search ? model.highlightTerms : []
+    }
+
+    /// Performans: çok uzun gövdede vurgu taraması ilk N karaktere sınırlanır.
+    private static let bodyHighlightScanLimit = 20_000
+
+    /// Düz metin gövdeyi, arama terimleri varsa vurgulu `Text` olarak kurar; yoksa düz `Text`.
+    /// Ofsetler ilk `bodyHighlightScanLimit` karakter üzerinde hesaplanır; bu prefix tam metinle
+    /// aynı baş karakterleri paylaştığından aralıklar tam gövdeye de güvenle uygulanır.
+    private func bodyText(_ raw: String) -> Text {
+        let terms = bodyHighlightTerms
+        guard !terms.isEmpty else { return Text(raw) }
+        let scan = raw.count > Self.bodyHighlightScanLimit ? String(raw.prefix(Self.bodyHighlightScanLimit)) : raw
+        let ranges = TermHighlighter.ranges(in: scan, terms: terms)
+        guard !ranges.isEmpty else { return Text(raw) }
+        return Text(AttributedString(body: raw, highlights: ranges))
+    }
+
     @ViewBuilder private var content: some View {
         if let hit = model.selectedHit {
             VStack(alignment: .leading, spacing: 0) {
@@ -1756,13 +1795,13 @@ private struct ReadingPane: View {
                 Divider().overlay(Theme.line)
 
                 if formatted, let html = model.selectedHTML, !html.isEmpty {
-                    HTMLView(html: html)
+                    HTMLView(html: html, terms: bodyHighlightTerms)
                         .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall))
                         .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.line))
                         .padding(12)
                 } else {
                     ScrollView {
-                        Text(model.selectedBody?.isEmpty == false ? model.selectedBody! : hit.snippet)
+                        bodyText(model.selectedBody?.isEmpty == false ? model.selectedBody! : hit.snippet)
                             .font(.system(size: 13)).foregroundStyle(Theme.ink).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(16)
                     }

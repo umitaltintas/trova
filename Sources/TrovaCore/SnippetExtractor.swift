@@ -30,7 +30,6 @@ public struct Snippet: Equatable, Sendable {
 /// - Kısa terimleri (1 harf) ve operatör/tarih kelimelerini ÇAĞIRAN taraf elemelidir;
 ///   bu tip yalnız kendisine verilen `terms` listesini kullanır.
 public enum SnippetExtractor {
-    private static let locale = Locale(identifier: "tr_TR")
     private static let ellipsis = "…"
 
     /// En çok DISTINCT terim eşleşmesi içeren ~`maxLength`'lik pencereyi seçer; kelime
@@ -45,14 +44,14 @@ public enum SnippetExtractor {
         let maxLen = max(1, maxLength)
 
         // Terimleri normalize et: küçük harf (Türkçe), boşları/kopyaları ele.
-        let normTerms = normalize(terms)
+        let normTerms = TermMatching.normalize(terms)
         guard !normTerms.isEmpty else { return leadingSnippet(chars: chars, maxLen: maxLen) }
 
         // Gövdeyi karakter karakter küçük harfe indir ve her küçük-harf karakterinin
         // orijinal karakter indeksini izle (Türkçe eşleme 1:1 olmayabilir).
-        let (lowerChars, mapToOrig) = lowercaseWithMap(chars)
-        let matches = findMatches(lowerChars: lowerChars, mapToOrig: mapToOrig,
-                                  origCount: chars.count, terms: normTerms)
+        let (lowerChars, mapToOrig) = TermMatching.lowercaseWithMap(chars)
+        let matches = TermMatching.findMatches(lowerChars: lowerChars, mapToOrig: mapToOrig,
+                                               origCount: chars.count, terms: normTerms)
         guard !matches.isEmpty else { return leadingSnippet(chars: chars, maxLen: maxLen) }
 
         // En yoğun çekirdek aralığı seç, sonra bütçeye göre bağlamla genişlet.
@@ -62,68 +61,15 @@ public enum SnippetExtractor {
     }
 
     // MARK: - Yardımcılar
-
-    private struct Match { let lo: Int; let hi: Int; let termIndex: Int }   // orijinal karakter aralığı [lo, hi)
+    //
+    // Terim eşleştirme (normalize / lowercaseWithMap / findMatches) ortak `TermMatching`
+    // yardımcısına taşındı; `TermHighlighter` ile tek kaynaktan paylaşılır.
 
     private static func isWord(_ c: Character) -> Bool { c.isLetter || c.isNumber }
 
-    /// Terimleri küçük harfe indirip kırpar, boşları atar ve tekilleştirir.
-    private static func normalize(_ terms: [String]) -> [[Character]] {
-        var seen = Set<String>()
-        var result: [[Character]] = []
-        for term in terms {
-            let trimmed = term.lowercased(with: locale)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            if seen.insert(trimmed).inserted { result.append(Array(trimmed)) }
-        }
-        return result
-    }
-
-    /// Küçük harfli karakter dizisi + her küçük-harf karakterinin orijinal indeksine haritası.
-    private static func lowercaseWithMap(_ chars: [Character]) -> (lower: [Character], map: [Int]) {
-        var lower: [Character] = []
-        var map: [Int] = []
-        lower.reserveCapacity(chars.count)
-        map.reserveCapacity(chars.count)
-        for (i, ch) in chars.enumerated() {
-            for lc in String(ch).lowercased(with: locale) {
-                lower.append(lc)
-                map.append(i)
-            }
-        }
-        return (lower, map)
-    }
-
-    /// Tüm terimlerin (terim başına örtüşmeyen) eşleşmelerini orijinal karakter aralığı olarak bulur.
-    private static func findMatches(lowerChars: [Character], mapToOrig: [Int],
-                                    origCount: Int, terms: [[Character]]) -> [Match] {
-        var matches: [Match] = []
-        let m = lowerChars.count
-        for (ti, term) in terms.enumerated() {
-            let t = term.count
-            guard t > 0, t <= m else { continue }
-            var k = 0
-            while k <= m - t {
-                var j = 0
-                while j < t && lowerChars[k + j] == term[j] { j += 1 }
-                if j == t {
-                    let lo = mapToOrig[k]
-                    let hi = (k + t - 1) < mapToOrig.count ? mapToOrig[k + t - 1] + 1 : origCount
-                    matches.append(Match(lo: lo, hi: hi, termIndex: ti))
-                    k += t                 // aynı terim için bir sonraki örtüşmeyen eşleşmeye atla
-                } else {
-                    k += 1
-                }
-            }
-        }
-        matches.sort { $0.lo != $1.lo ? $0.lo < $1.lo : $0.hi < $1.hi }
-        return matches
-    }
-
     /// Genişliği `maxLen`'i aşmayan ve en çok DISTINCT terim içeren eşleşme öbeğinin
     /// orijinal karakter aralığını [lo, hi) döndürür (eşitlikte daha çok eşleşme kazanır).
-    private static func bestWindow(matches: [Match], maxLen: Int) -> (lo: Int, hi: Int) {
+    private static func bestWindow(matches: [TermMatching.Match], maxLen: Int) -> (lo: Int, hi: Int) {
         var best = (distinct: -1, total: 0, lo: matches[0].lo, hi: matches[0].hi)
         var termCounts: [Int: Int] = [:]
         var l = 0
@@ -148,7 +94,7 @@ public enum SnippetExtractor {
 
     /// Çekirdek aralığı bağlamla `maxLen`'e kadar genişletir, kelime sınırına hizalar,
     /// "…" ekler ve vurguları snippet metnine göre konumlandırır.
-    private static func buildSnippet(chars: [Character], matches: [Match],
+    private static func buildSnippet(chars: [Character], matches: [TermMatching.Match],
                                      coreLo: Int, coreHi: Int, maxLen: Int) -> Snippet {
         let n = chars.count
         let coreWidth = coreHi - coreLo
