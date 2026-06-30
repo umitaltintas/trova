@@ -600,6 +600,35 @@ public final class IndexStore: Sendable {
         }
     }
 
+    /// Ölçütlere uyan mail SAYISINI (içerik değil) döndürür — ajanın nicel/sayma soruları için.
+    /// `query` doluysa `search` ile AYNI FTS5 deseni (`ftsPattern`, tırnaklı + ön ek `*`) ve aynı
+    /// `message_fts JOIN message` yapısı üzerinden eşleşme + filtre sayılır; `query` boş/yalnız
+    /// boşluksa FTS atlanır, yalnız `filterSQL` ile `COUNT(*)` yapılır. Mevcut `search`/`browse`
+    /// davranışını bozmaz; aynı yardımcıları (ftsPattern/filterSQL) paylaşır.
+    public func countMatching(query: String?, filter: SearchFilter = .init()) throws -> Int {
+        let (clause, filterArgs) = Self.filterSQL(filter)
+        let trimmed = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            // Sorgu yok → yalnız filtre ile say (FTS'e gerek yok).
+            return try dbQueue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM message m WHERE 1=1\(clause)",
+                                 arguments: StatementArguments(filterArgs)) ?? 0
+            }
+        }
+        let pattern = Self.ftsPattern(trimmed)
+        guard !pattern.isEmpty else { return 0 }   // `search` ile tutarlı: desen boşsa eşleşme yok
+        return try dbQueue.read { db in
+            var args: [(any DatabaseValueConvertible)?] = [pattern]
+            args += filterArgs
+            return try Int.fetchOne(db, sql: """
+                SELECT COUNT(*)
+                FROM message_fts
+                JOIN message m ON m.rowid = message_fts.rowid
+                WHERE message_fts MATCH ?\(clause)
+                """, arguments: StatementArguments(args)) ?? 0
+        }
+    }
+
     /// Filtreye uyan id kümesi (vektör aramasını kısıtlamak için).
     public func idsMatching(_ filter: SearchFilter) throws -> Set<String> {
         let (clause, filterArgs) = Self.filterSQL(filter)

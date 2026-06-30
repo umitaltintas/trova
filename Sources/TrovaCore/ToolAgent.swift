@@ -336,6 +336,26 @@ public struct ToolAgent: Sendable {
             return (lines.isEmpty ? "Eşleşme yok." : header + "\n" + lines.joined(separator: "\n"),
                     AgentStep(kind: .search, detail: "gönderen: \(query)"), [])
 
+        case "count_mail":
+            var filter = SearchFilter()
+            let query = (args["query"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let from = (args["from"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let from, !from.isEmpty { filter.fromContains = from }
+            if (args["has_attachment"] as? Bool) == true { filter.hasAttachment = true }
+            // Tarihleri ("YYYY-MM-DD") ayrıştır; geçersiz/boşsa zarifçe yoksay (filtreye/özete girmez).
+            var sinceLabel: String?
+            if let s = args["since"] as? String, let d = Self.parseCountDate(s) {
+                filter.since = d; sinceLabel = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            var untilLabel: String?
+            if let u = args["until"] as? String, let d = Self.parseCountDate(u, endOfDay: true) {
+                filter.until = d; untilLabel = u.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let count = (try? store.countMatching(query: query, filter: filter)) ?? 0
+            let text = Self.countText(query: query, from: filter.fromContains, since: sinceLabel,
+                                      until: untilLabel, hasAttachment: filter.hasAttachment, count: count)
+            return (text, AgentStep(kind: .note, detail: "sayım: \(count)"), [])
+
         case "read_attachment":
             guard let handle = args["handle"] as? String, let hit = handles[handle] else {
                 return ("Geçersiz handle.", AgentStep(kind: .read, detail: "ek"), [])
@@ -402,6 +422,36 @@ public struct ToolAgent: Sendable {
         return text
     }
 
+    /// `count_mail` aracının saf Türkçe özet biçimlendiricisi (I/O içermez → kolayca test edilir).
+    /// Yalnızca verilen (boş olmayan) ölçütleri parantez içinde listeler; hiçbiri yoksa sade cümle.
+    static func countText(query: String?, from: String?, since: String?, until: String?,
+                          hasAttachment: Bool, count: Int) -> String {
+        var criteria: [String] = []
+        if let query, !query.isEmpty { criteria.append("sorgu: \(query)") }
+        if let from, !from.isEmpty { criteria.append("gönderen: \(from)") }
+        if let since, !since.isEmpty { criteria.append("başlangıç tarihi: \(since)") }
+        if let until, !until.isEmpty { criteria.append("son tarih: \(until)") }
+        if hasAttachment { criteria.append("ekli") }
+        let suffix = criteria.isEmpty ? "" : " (\(criteria.joined(separator: ", ")))"
+        return "Ölçütlere uyan \(count) mail bulundu\(suffix)."
+    }
+
+    /// `count_mail` için "YYYY-MM-DD" tarihini yerel saat dilimine göre ayrıştırır (geçersizse nil →
+    /// ajan tarihi zarifçe yoksayar). `endOfDay` true ise günün sonuna (23:59:59) çekilir; böylece
+    /// `until` filtresi (m.date <= ?) verilen günü TÜMÜYLE kapsar.
+    static func parseCountDate(_ string: String, endOfDay: Bool = false) -> Date? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.timeZone = TimeZone.current
+        fmt.dateFormat = "yyyy-MM-dd"
+        guard let day = fmt.date(from: trimmed) else { return nil }
+        guard endOfDay else { return day }
+        return Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: day) ?? day
+    }
+
     private func describe(handle: String, hit: SearchHit) -> String {
         let date = hit.date.map(Self.isoDate) ?? "-"
         let attachments = hit.attachments.isEmpty ? "" : " [ek: \(hit.attachments.joined(separator: ", "))]"
@@ -419,6 +469,8 @@ public struct ToolAgent: Sendable {
         - search_mail: maillerde ara (hibrit/anlamsal/kelime, tarih filtresi).
         - read_mail: bir mailin tam gövdesini oku.
         - find_by_sender: bir göndericiden gelen mailleri ve toplam sayıyı getir.
+        - count_mail: ölçütlere (sorgu/gönderen/tarih/ek) uyan mail SAYISINI döndür. Nicel/sayma
+          soruları ("kaç ...", "ne kadar ...") için; içerik değil yalnız sayı gerektiğinde kullan.
         - list_thread / summarize_thread: bir konunun mailleri (özet listesi / tam gövdeler).
         - read_attachment: PDF/görsel/metin ekten içerik çıkar (fatura, fiş, sözleşme için — OCR dahil).
         - overview: posta kutusu genel istatistiği (toplam mail, hesaplar, ekler, aylık dağılım).
@@ -492,6 +544,27 @@ public struct ToolAgent: Sendable {
                     "limit": ["type": "integer", "description": "Sonuç sayısı (varsayılan 10)"],
                 ],
                 "required": ["query"],
+            ],
+        ]],
+        ["type": "function", "function": [
+            "name": "count_mail",
+            "description": "Belirtilen ölçütlere uyan mail SAYISINI döndürür (içerik değil). "
+                + "Nicel/sayma sorular için kullan (örn. 'geçen ay kaç fatura', 'Ali'den kaç mail', "
+                + "'kaç ekli mail').",
+            "parameters": [
+                "type": "object",
+                "properties": [
+                    "query": ["type": "string",
+                              "description": "Konu/gövdede aranacak kelimeler (opsiyonel)"],
+                    "from": ["type": "string",
+                             "description": "Gönderen adı/e-postasında geçen metin (opsiyonel)"],
+                    "since": ["type": "string",
+                              "description": "Başlangıç tarihi (dahil), YYYY-MM-DD (opsiyonel)"],
+                    "until": ["type": "string",
+                              "description": "Bitiş tarihi (dahil), YYYY-MM-DD (opsiyonel)"],
+                    "has_attachment": ["type": "boolean",
+                                       "description": "Yalnızca ekli mailleri say (opsiyonel)"],
+                ],
             ],
         ]],
         ["type": "function", "function": [
