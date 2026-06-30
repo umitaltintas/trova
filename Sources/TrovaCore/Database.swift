@@ -138,6 +138,19 @@ public struct IndexedState: Sendable {
     public let parserVersion: Int
 }
 
+/// `IndexStore.upsert` sonucu. `inserted`: DB'ye ilk kez giren TEKİL satır sayısı ("N yeni mail").
+/// `duplicates`: aynı Message-ID zaten BAŞKA bir id'de var olduğu için EKLENMEYEN kopya `.emlx`
+/// sayısı (inserted'a dahil DEĞİL). `duplicateIDs`: o kopyaların id'leri — çağıran bunların
+/// eklerini/içeriğini yazmayı atlasın (yoksa olmayan mesaj satırına FK ihlali olur).
+public struct UpsertResult: Sendable, Equatable {
+    public var inserted: Int
+    public var duplicates: Int
+    public var duplicateIDs: Set<String>
+    public init(inserted: Int = 0, duplicates: Int = 0, duplicateIDs: Set<String> = []) {
+        self.inserted = inserted; self.duplicates = duplicates; self.duplicateIDs = duplicateIDs
+    }
+}
+
 /// Ajanın oturumlar arası hatırladığı kalıcı bir bilgi (tercih, kişi/proje, talimat).
 public struct Memory: Sendable, Identifiable {
     public let id: String
@@ -367,24 +380,51 @@ public final class IndexStore: Sendable {
                 t.tokenizer = .unicode61()
             }
         }
+
+        // Faz 12: Message-ID ile mail tekilleştirme. Apple Mail (Gmail/IMAP) AYNI mantıksal maili
+        // birden çok yere yazar (Tüm Postalar + Gelen Kutusu + her etiket) → aynı mail için çok
+        // sayıda `.emlx`. Her dosya yolu ayrı `id` ürettiğinden satırlar kopyalarla şişer ve senkron
+        // sırasında sürekli "yeni mail" sayılır. `messageID` üzerine index → "bu Message-ID başka bir
+        // id'de var mı?" (ileriye dönük dedup) sorgusu ucuzlar. Additive: yalnız index; veri/şema
+        // değişmez, mevcut DB bozulmaz.
+        migrator.registerMigration("v12_messageID_index") { db in
+            try db.execute(sql:
+                "CREATE INDEX IF NOT EXISTS idx_message_messageID ON message(messageID)")
+        }
         return migrator
     }
 
     /// Kayıtları ekler/günceller (PK çakışmasında satırı değiştirir → FTS tetikleyicileri çalışır).
-    /// Dönüş: gerçekten YENİ eklenen (daha önce var olmayan id) satır sayısı — "N yeni mail" için.
+    /// İleriye dönük tekilleştirme: `messageID` non-nil ve aynı Message-ID BAŞKA bir `id`'ye (dosya
+    /// yolu) ait bir satırda zaten varsa, bu kayıt kopya bir `.emlx`'tir → EKLENMEZ (`duplicates`
+    /// sayılır). Kendi `id`'sinin satırı (re-upsert → güncelleme) ve NULL/boş `messageID` dedup
+    /// EDİLMEZ. Dönüş: ilk kez eklenen tekil satır + atlanan kopya sayısı + kopya id'leri.
     @discardableResult
-    public func upsert(_ records: [MessageRecord]) throws -> Int {
+    public func upsert(_ records: [MessageRecord]) throws -> UpsertResult {
         try dbQueue.write { db in
-            var inserted = 0
+            var result = UpsertResult()
             for record in records {
-                // INSERT öncesi var-mı kontrolü: id yoksa bu yeni bir mail satırı, varsa güncelleme.
-                let exists = try Bool.fetchOne(
+                // Bu id (dosya yolu) zaten var mı? Varsa güncelleme; yoksa olası yeni satır.
+                let existsForID = try Bool.fetchOne(
                     db, sql: "SELECT EXISTS(SELECT 1 FROM message WHERE id = ?)",
                     arguments: [record.id]) ?? false
-                if !exists { inserted += 1 }
+                // Kopya `.emlx` kapısı: yalnız YENİ bir id için ve messageID doluysa denetlenir.
+                // (Aynı parti içindeki kopyalar da yakalanır: ilk kopya eklenir, sonrakiler bu
+                // satırı BAŞKA id'de görüp atlanır.)
+                if !existsForID, let mid = record.messageID, !mid.isEmpty {
+                    let dupElsewhere = try Bool.fetchOne(
+                        db, sql: "SELECT EXISTS(SELECT 1 FROM message WHERE messageID = ? AND id <> ?)",
+                        arguments: [mid, record.id]) ?? false
+                    if dupElsewhere {
+                        result.duplicates += 1
+                        result.duplicateIDs.insert(record.id)
+                        continue   // kopyayı ekleme → sayı şişmesin, "yeni mail" churn'ü olmasın
+                    }
+                }
+                if !existsForID { result.inserted += 1 }
                 try record.insert(db, onConflict: .replace)
             }
-            return inserted
+            return result
         }
     }
 
@@ -392,6 +432,78 @@ public final class IndexStore: Sendable {
         try dbQueue.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM message") ?? 0
         }
+    }
+
+    // MARK: - Tekilleştirme (Faz 12)
+
+    /// NULL olmayan Message-ID'ler arasındaki YİNELENEN (fazladan) satır sayısı:
+    /// toplam − farklı Message-ID. `dedupeExisting`'in sileceği satır sayısına eşittir; UI'da
+    /// "Yinelenenleri temizle" düğmesi yanında gösterilir. NULL/boş messageID'ler hariç tutulur.
+    public func duplicateCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(messageID) - COUNT(DISTINCT messageID) FROM message
+                WHERE messageID IS NOT NULL AND messageID <> ''
+                """) ?? 0
+        }
+    }
+
+    /// Mevcut yinelenen mailleri tek seferde temizler (kullanıcı tetikler — otomatik DEĞİL):
+    /// aynı non-null `messageID` için bir KANONİK satır tutar, gerisini ve YETİM
+    /// `message_vector`/`attachment`/`attachment_content` kayıtlarını siler. Hepsi tek
+    /// transaction → FK/veri tutarlı kalır. `.emlx` kaynak olduğundan satır silmek geri-üretilebilir.
+    ///
+    /// Kanonik seçim (deterministik, veri koruyucu): (a) vektörü (embedding) olan satır — gömme
+    /// kaybolmasın; yoksa (b) gelen/gönderilen kutusundaki satır — arşiv/etiket yerine; yoksa
+    /// (c) en küçük rowid. Dönüş: silinen (kopya) satır sayısı.
+    @discardableResult
+    public func dedupeExisting(progress: ((_ processed: Int, _ total: Int) -> Void)? = nil) throws -> Int {
+        try dbQueue.write { db in
+            let dupMessageIDs = try String.fetchAll(db, sql: """
+                SELECT messageID FROM message
+                WHERE messageID IS NOT NULL AND messageID <> ''
+                GROUP BY messageID HAVING COUNT(*) > 1
+                """)
+            let total = dupMessageIDs.count
+            var deleted = 0
+            for (i, mid) in dupMessageIDs.enumerated() {
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT m.rowid AS rid, m.id AS id, m.mailbox AS mailbox,
+                           (v.id IS NOT NULL) AS hasVector
+                    FROM message m LEFT JOIN message_vector v ON v.id = m.id
+                    WHERE m.messageID = ?
+                    """, arguments: [mid])
+                guard rows.count > 1 else { continue }
+                let keepID = Self.canonicalID(from: rows)
+                for row in rows where (row["id"] as String) != keepID {
+                    let id: String = row["id"]
+                    // FTS (message_fts) tetikleyiciyle senkron; message_vector/attachment FK CASCADE
+                    // ile gider — ama attachment_content (FK'siz FTS5) ELLE silinmeli. Tümünü açıkça
+                    // silerek FK pragma durumundan bağımsız yetimsizliği garanti ederiz.
+                    try db.execute(sql: "DELETE FROM attachment_content WHERE messageID = ?", arguments: [id])
+                    try db.execute(sql: "DELETE FROM attachment WHERE messageID = ?", arguments: [id])
+                    try db.execute(sql: "DELETE FROM message_vector WHERE id = ?", arguments: [id])
+                    try db.execute(sql: "DELETE FROM message WHERE id = ?", arguments: [id])
+                    deleted += 1
+                }
+                progress?(i + 1, total)
+            }
+            return deleted
+        }
+    }
+
+    /// Aynı Message-ID'li satırlar arasından tutulacak KANONİK satırın id'sini seçer (yukarıdaki
+    /// (a)→(b)→(c) önceliğiyle; rowid benzersiz olduğundan sıralama kesin/total). Saf yardımcı.
+    static func canonicalID(from rows: [Row]) -> String {
+        func rank(_ row: Row) -> (Int, Int, Int64) {
+            let hasVector = ((row["hasVector"] as Int?) ?? 0) != 0
+            let mailbox = (row["mailbox"] as String?) ?? ""
+            let preferredBox = isActionableMailbox(mailbox) || isSentMailbox(mailbox)
+            let rid: Int64 = row["rid"]
+            return (hasVector ? 0 : 1, preferredBox ? 0 : 1, rid)   // küçük anahtar kazanır
+        }
+        let best = rows.min { rank($0) < rank($1) }!
+        return best["id"]
     }
 
     /// Artımlı indeksleme durumu: id → (dosya mtime, parser sürümü).

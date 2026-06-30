@@ -62,6 +62,7 @@ final class AppModel {
     var vectorCount = 0
     var memoryCount = 0
     var attachmentContentCount = 0   // ek içeriği indekslenmiş mail sayısı (Ayarlar göstergesi)
+    var duplicateCount = 0           // aynı Message-ID'li yinelenen (fazladan) satır sayısı (Bakım göstergesi)
     var accounts: [AccountStat] = []
 
     // Kişiler (en çok yazışılanlar)
@@ -344,11 +345,15 @@ final class AppModel {
             refreshStatus()
             guard let result else { return }
             progress = result.processed > 0
-                ? "\(result.indexed) yeni · \(result.skipped) atlandı · \(result.failed) hata"
+                ? "\(result.inserted) yeni · \(result.duplicates) kopya · \(result.skipped) atlandı · \(result.failed) hata"
                 : "Mail bulunamadı"
-            // Yeni eklenen mailleri kullanıcı rozete dokunana dek biriktir.
-            if result.inserted > 0 { newMailCount += result.inserted }
-            refreshVisibleSection()
+            // Churn kapısı (iter 24): YALNIZ gerçek tekil yeni mail (inserted>0) varken rozeti artır
+            // ve görünür listeyi sessizce tazele. Kopya `.emlx`'ler (forward-dedup sayesinde) inserted
+            // üretmez → 0-yeni turlarda rozet artmaz, liste sabit kalır (senkron churn'ü durur).
+            if result.inserted > 0 {
+                newMailCount += result.inserted
+                refreshVisibleSection()
+            }
         }
     }
 
@@ -416,14 +421,14 @@ final class AppModel {
 
     func refreshStatus() {
         Task {
-            guard let stats = await background({ () -> (Int, Int, Int, Int, [AccountStat]) in
+            guard let stats = await background({ () -> (Int, Int, Int, Int, Int, [AccountStat]) in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 let accounts = try store.accountCounts().map { AccountStat(account: $0.account, count: $0.count) }
                 return (try store.count(), try store.vectorCount(), try store.memoryCount(),
-                        try store.attachmentContentCount(), accounts)
+                        try store.attachmentContentCount(), try store.duplicateCount(), accounts)
             }) else { return }
             totalCount = stats.0; vectorCount = stats.1; memoryCount = stats.2
-            attachmentContentCount = stats.3; accounts = stats.4
+            attachmentContentCount = stats.3; duplicateCount = stats.4; accounts = stats.5
             statusLoaded = true
         }
         refreshProviders()
@@ -657,8 +662,32 @@ final class AppModel {
             }
             if let result {
                 progress = result.processed > 0
-                    ? "\(result.indexed) yeni · \(result.skipped) atlandı · \(result.failed) hata"
+                    ? "\(result.inserted) yeni · \(result.duplicates) kopya · \(result.skipped) atlandı · \(result.failed) hata"
                     : "Mail bulunamadı"
+            }
+        }
+    }
+
+    /// Yinelenen mail satırlarını (aynı Message-ID — Apple Mail'in kopya `.emlx`'leri) tek seferde
+    /// temizler: kanonik satırı tutar, kopyaları + yetim vektör/ek/ek-içeriği kayıtlarını siler.
+    /// Otomatik DEĞİL — kullanıcı Bakım'dan tetikler (güvenli; `.emlx` kaynak olduğundan geri-üretilebilir).
+    func dedupeMessages() {
+        guard !busy else { return }
+        busy = true; errorMessage = nil; jobProcessed = 0; jobTotal = 0
+        progress = "Yinelenenler taranıyor…"
+        currentTask = Task {
+            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus() }
+            let removed = await background { () -> Int in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                return try store.dedupeExisting { processed, total in
+                    Task { @MainActor in
+                        self.jobProcessed = processed; self.jobTotal = total
+                        self.progress = "Yinelenenler temizleniyor \(processed)/\(total)"
+                    }
+                }
+            }
+            if let removed {
+                progress = removed == 0 ? "Yinelenen mail bulunamadı" : "\(removed) kopya kaldırıldı"
             }
         }
     }

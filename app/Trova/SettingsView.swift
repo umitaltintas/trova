@@ -136,6 +136,42 @@ struct SettingsView: View {
             .tabItem { Label("Ek içeriği", systemImage: "doc.text.magnifyingglass") }
             .padding()
             .onAppear { model.refreshStatus() }
+
+            Form {
+                Text("Yinelenen mailler")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text("Apple Mail (Gmail/IMAP) aynı maili birden çok yere yazar (Tüm Postalar + Gelen "
+                   + "Kutusu + her etiket) → aynı mail için birden çok `.emlx` dosyası. Bunlar indekste "
+                   + "kopya satırlar oluşturur; sayıyı şişirir. Bu araç her mail için tek bir kanonik "
+                   + "satır bırakıp kopyaları (ve yetim ek/gömme kayıtlarını) siler. Kaynak `.emlx` "
+                   + "dosyalarına DOKUNMAZ — yalnızca indeksi sadeleştirir.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Divider()
+
+                Text(model.duplicateCount > 0
+                     ? "\(model.totalCount) satır · \(model.duplicateCount) yinelenen"
+                     : "\(model.totalCount) satır · yinelenen yok")
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted)
+
+                Button {
+                    model.dedupeMessages()
+                } label: {
+                    Label("Yinelenen mailleri temizle", systemImage: "rectangle.stack.badge.minus")
+                }
+                .disabled(model.busy || model.duplicateCount == 0)
+
+                if model.busy, !model.progress.isEmpty {
+                    Divider()
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(model.progress).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
+            .tabItem { Label("Bakım", systemImage: "wrench.and.screwdriver") }
+            .padding()
+            .onAppear { model.refreshStatus() }
         }
         .frame(width: 480, height: 460)
     }

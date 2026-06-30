@@ -83,7 +83,7 @@ extension Trova {
             let result = try Indexer.run(store: store, root: root, limit: limit) { processed, total in
                 FileHandle.standardError.write(Data("\r\(processed)/\(total) işlendi…".utf8))
             }
-            print("\nBitti: \(result.indexed) yeni · \(result.skipped) atlandı · \(result.failed) hata · \(result.processed) toplam.")
+            print("\nBitti: \(result.inserted) yeni · \(result.duplicates) kopya · \(result.skipped) atlandı · \(result.failed) hata · \(result.processed) toplam.")
             print("Veritabanındaki kayıt: \(try store.count())")
         }
     }

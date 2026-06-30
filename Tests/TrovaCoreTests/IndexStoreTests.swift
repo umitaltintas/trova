@@ -60,18 +60,18 @@ final class IndexStoreTests: XCTestCase {
             record(id: "1", subject: "a", body: "x"),
             record(id: "2", subject: "b", body: "y"),
             record(id: "3", subject: "c", body: "z"),
-        ])
+        ]).inserted
         XCTAssertEqual(inserted, 3)
 
         // Aynı kayıtları (değişmeden) tekrar yaz → hiçbiri yeni değil.
         let again = try store.upsert([
             record(id: "1", subject: "a", body: "x"),
             record(id: "2", subject: "b", body: "y"),
-        ])
+        ]).inserted
         XCTAssertEqual(again, 0)
 
         // Var olan bir kayıt değişirse: yeni sayılmaz (0) ama satır güncellenir.
-        let changed = try store.upsert([record(id: "1", subject: "a2", body: "güncel gövde")])
+        let changed = try store.upsert([record(id: "1", subject: "a2", body: "güncel gövde")]).inserted
         XCTAssertEqual(changed, 0)
         XCTAssertEqual(try store.count(), 3)  // hâlâ 3 satır
         XCTAssertEqual(try store.search(query: "güncel", limit: 10).first?.id, "1")
@@ -82,7 +82,7 @@ final class IndexStoreTests: XCTestCase {
             record(id: "4", subject: "d", body: "w"),
             record(id: "3", subject: "c", body: "z"),
             record(id: "5", subject: "e", body: "v"),
-        ])
+        ]).inserted
         XCTAssertEqual(mixed, 2)
     }
 

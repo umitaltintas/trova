@@ -6,9 +6,12 @@ public struct IndexResult: Sendable {
     public var indexed = 0
     public var skipped = 0
     public var failed = 0
-    /// Bu çalışmada DB'ye ilk kez eklenen (daha önce var olmayan) mesaj satırı sayısı.
-    /// "N yeni mail" göstergesi bundan beslenir; güncellenen satırlar bu sayıya dahil değildir.
+    /// Bu çalışmada DB'ye ilk kez eklenen (daha önce var olmayan) TEKİL mesaj satırı sayısı.
+    /// "N yeni mail" göstergesi bundan beslenir; güncellenen VE kopya satırlar bu sayıya dahil değildir.
     public var inserted = 0
+    /// Bu çalışmada Message-ID'si zaten BAŞKA bir satırda var olduğu için ATLANAN kopya `.emlx`
+    /// sayısı (Apple Mail aynı maili birden çok yere yazar). inserted'a dahil DEĞİLDİR.
+    public var duplicates = 0
 }
 
 /// Uzun işlemleri iş parçacıkları arası güvenli biçimde iptal etmek için bayrak.
@@ -49,6 +52,27 @@ public enum Indexer {
         var attachmentBatch: [(messageID: String, names: [String])] = []
         // Opt-in: ek İÇERİĞİ (OCR'sız ucuz metin). KAPALIYKEN bu liste hiç doldurulmaz.
         var contentBatch: [(messageID: String, text: String)] = []
+
+        // Biriken partiyi yazar: önce mesaj satırları (dedup'lı), sonra YALNIZ eklenen mesajların
+        // ek adları/içeriği. Kopya `.emlx` olarak atlanan id'lerin (mesaj satırı yok) eklerini
+        // yazmayız — yoksa FK ihlali olur; kanonik satırın ekleri zaten korunur.
+        func flush() throws {
+            guard !batch.isEmpty else { return }
+            let up = try store.upsert(batch)
+            result.inserted += up.inserted
+            result.duplicates += up.duplicates
+            let keptAttachments = up.duplicateIDs.isEmpty ? attachmentBatch
+                : attachmentBatch.filter { !up.duplicateIDs.contains($0.messageID) }
+            try store.replaceAttachments(keptAttachments)
+            if !contentBatch.isEmpty {
+                let keptContent = up.duplicateIDs.isEmpty ? contentBatch
+                    : contentBatch.filter { !up.duplicateIDs.contains($0.messageID) }
+                if !keptContent.isEmpty { try store.replaceAttachmentContents(keptContent) }
+            }
+            batch.removeAll(keepingCapacity: true)
+            attachmentBatch.removeAll(keepingCapacity: true)
+            contentBatch.removeAll(keepingCapacity: true)
+        }
 
         for message in messages {
             if cancel?.isCancelled == true { break }
@@ -111,22 +135,11 @@ public enum Indexer {
             }
 
             if batch.count >= batchSize {
-                result.inserted += try store.upsert(batch)           // önce mesaj satırları (FK)
-                try store.replaceAttachments(attachmentBatch)        // sonra ek adları (idempotent)
-                if !contentBatch.isEmpty {
-                    try store.replaceAttachmentContents(contentBatch)  // sonra ek içeriği (opt-in)
-                    contentBatch.removeAll(keepingCapacity: true)
-                }
-                batch.removeAll(keepingCapacity: true)
-                attachmentBatch.removeAll(keepingCapacity: true)
+                try flush()
                 progress?(result.processed, total)
             }
         }
-        if !batch.isEmpty {
-            result.inserted += try store.upsert(batch)
-            try store.replaceAttachments(attachmentBatch)
-            if !contentBatch.isEmpty { try store.replaceAttachmentContents(contentBatch) }
-        }
+        try flush()
         progress?(result.processed, total)
         return result
     }
