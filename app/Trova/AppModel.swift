@@ -127,6 +127,7 @@ final class AppModel {
     var searchAttachmentKind: AttachmentKind?   // has:<tür> operatörüyle seçilen ek türü (çip için)
     var expansionChips: [String] = []    // PRF ile sorguya eklenen terimler (gösterim)
     var highlightTerms: [String] = []    // sonuç snippet'lerinde vurgulanacak terimler (temizlenmiş sorgu + genişletme)
+    var activeSenderFilter: String?      // tıklanan gönderen facet'i (istemci tarafı daraltma; yeniden sorgu YOK)
 
     // Benzer mailler (embedding tabanlı more-like-this) — yalnız kullanıcı isteyince yüklenir.
     var similarMails: [SearchHit] = []
@@ -184,10 +185,31 @@ final class AppModel {
         recentSearches = RecentSearchesStore.load()
     }
 
-    /// Arama sonuçlarının gösterim listesi: ham `results` üzerine seçili sıralama uygulanır.
+    /// Ham `results` üzerine yalnız seçili sıralama uygulanmış liste (gönderen filtresi UYGULANMADAN).
     /// `resultSort` değişince YENİDEN SORGU yapılmaz; yalnız bu liste yeniden hesaplanır.
     var sortedResults: [SearchHit] {
         ResultSorter.sort(results, by: resultSort)
+    }
+
+    /// Kullanıcıya gösterilen nihai liste: sıralı sonuçlar, varsa aktif gönderen facet'iyle daraltılmış.
+    /// Liste (sayaç/dışa aktarım/klavye) bunu izler; facet sayıları ise filtre öncesi kümeden gelir.
+    var displayedResults: [SearchHit] {
+        guard let sender = activeSenderFilter else { return sortedResults }
+        return Facets.filter(sortedResults, bySender: sender)
+    }
+
+    /// Sonuçlardaki en sık gönderenler (sayılı çipler). Filtre UYGULANMADAN ham `results`'tan
+    /// hesaplanır ki bir gönderen seçilince çipler kaybolmasın ve sayılar sabit kalsın.
+    var senderFacets: [Facet] {
+        Facets.senders(results)
+    }
+
+    /// Bir gönderen facet'ine tıklayınca istemci tarafı daraltmayı uygular (yeniden sorgu YOK).
+    /// `nil` geçilince filtreyi temizler. Her iki durumda gösterilen listenin ilkini seçer.
+    func applySenderFilter(_ sender: String?) {
+        activeSenderFilter = sender
+        selection = displayedResults.first?.id
+        loadSelected()
     }
 
     var selectedHit: SearchHit? {
@@ -205,7 +227,7 @@ final class AppModel {
     /// Açık bölüme göre klavyeyle gezinilebilir aktif mail id listesi (görünen sırayla).
     var navigableIDs: [String] {
         switch section {
-        case .search:   sortedResults.map(\.id)
+        case .search:   displayedResults.map(\.id)
         case .people:   personMails.map(\.id)
         case .digest:   (needsReply + waitingOn).map(\.id)
         case .ask:      conversation.flatMap(\.cited).map(\.id)
@@ -260,8 +282,8 @@ final class AppModel {
     func exportSearchResults() -> String {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = q.isEmpty ? "Arama sonuçları" : "Arama: \(q)"
-        // Dışa aktarım kullanıcının gördüğü sırayı (seçili sıralama) izler.
-        return MarkdownExporter.emailList(title: title, items: listItems(sortedResults))
+        // Dışa aktarım kullanıcının gördüğü listeyi (seçili sıralama + aktif gönderen filtresi) izler.
+        return MarkdownExporter.emailList(title: title, items: listItems(displayedResults))
     }
 
     /// Seçili kişinin maillerini Markdown listesine döker. Başlık: kişinin adı (yoksa adresi).
@@ -763,6 +785,8 @@ final class AppModel {
 
     func runSearch() {
         let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Yeni arama: eski gönderen daraltması yeni sonuçlara yapışmasın diye sıfırla.
+        activeSenderFilter = nil
         // Arama metni yoksa bile aktif bir filtre çipi (okunmadı/bayraklı) varsa browse'a izin ver.
         guard !raw.isEmpty || unreadOnly || flaggedOnly else {
             results = []; selection = nil; highlightTerms = []; return
@@ -824,7 +848,7 @@ final class AppModel {
             expansionChips = outcome?.terms ?? []
             // Genişletme (PRF) terimlerini de vurgu listesine kat (temizlenmiş sorgu + genişletme).
             highlightTerms = AppModel.highlightTerms(query: q, expansion: outcome?.terms ?? [])
-            selection = sortedResults.first?.id   // gösterilen sıranın ilk satırını seç
+            selection = displayedResults.first?.id   // gösterilen listenin ilk satırını seç
             loadSelected()
         }
     }

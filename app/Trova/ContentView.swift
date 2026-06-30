@@ -405,8 +405,9 @@ private struct SearchColumn: View {
                     action: { model.runIndex() })
             } else {
                 // Sonuç sayısı + sıralama seçimi + listeyi Markdown'a dışa aktarma (yalnız sonuç varken).
+                // Sayaç GÖSTERİLEN (filtreli) listeyi yansıtır.
                 HStack(spacing: 8) {
-                    Text("\(model.results.count) sonuç").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                    Text("\(model.displayedResults.count) sonuç").font(.system(size: 11)).foregroundStyle(Theme.muted)
                     Spacer()
                     // Sıralama yalnız gösterimi etkiler; değişimi yeniden sorgu YAPMAZ.
                     Picker("Sırala", selection: $model.resultSort) {
@@ -420,8 +421,12 @@ private struct SearchColumn: View {
                                    labelText: "Sonuçları dışa aktar")
                 }
                 .padding(.horizontal, 14).padding(.vertical, 8)
+                // Gönderen daraltma facet'leri: birden çok gönderen varsa sayılı çipler göster.
+                if model.senderFacets.count > 1 {
+                    SenderFacetBar()
+                }
                 List(selection: $model.selection) {
-                    ForEach(model.sortedResults) { hit in
+                    ForEach(model.displayedResults) { hit in
                         ResultRow(hit: hit, terms: model.highlightTerms)
                             .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
                             .listRowSeparator(.hidden)
@@ -432,6 +437,35 @@ private struct SearchColumn: View {
             }
         }
         .background(Theme.surface)
+    }
+}
+
+/// Arama sonuçlarındaki en sık gönderenleri sayılı çiplerle gösterir; bir çipe tıklayınca
+/// o gönderene daraltır (istemci tarafı — yeniden sorgu YOK). Aktif filtre varken başta
+/// belirgin bir "✕ <gönderen>" temizleme çipi görünür. Sayılar filtre öncesi kümeden gelir;
+/// çok sayıda gönderende FlowLayout ile alt satıra sarar (taşma yok).
+private struct SenderFacetBar: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        FlowLayout(spacing: 6, lineSpacing: 6) {
+            // Aktif filtre → tek dokunuşla temizleme çipi.
+            if let active = model.activeSenderFilter {
+                FilterToggleChip(text: "✕ \(active)", systemImage: "person.fill", isOn: true) {
+                    model.applySenderFilter(nil)
+                }
+            }
+            ForEach(model.senderFacets, id: \.value) { facet in
+                let isActive = facet.value == model.activeSenderFilter
+                FilterToggleChip(text: "\(facet.value) (\(facet.count))",
+                                 systemImage: "person", isOn: isActive) {
+                    // Aktif çipe tekrar tıklamak filtreyi kaldırır.
+                    model.applySenderFilter(isActive ? nil : facet.value)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14).padding(.bottom, 8)
     }
 }
 
