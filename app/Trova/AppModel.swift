@@ -101,6 +101,9 @@ final class AppModel {
     var selectedBody: String?
     var selectedHTML: String?
     var selectedThread: [SearchHit] = []
+    var threadSummary: String?           // "Konuyu özetle" çıktısı (markdown)
+    var summaryThreadKey: String?        // özetin ait olduğu thread (başka thread'e geçince gizlenir)
+    var isSummarizing = false
     var selectedMessageID: String?       // seçili mailin RFC822 Message-ID'si ("Mail'de Aç" için)
     var isSearching = false
     var detectedDateLabel: String?       // sorgudan algılanan Türkçe tarih ifadesi etiketi (örn. "son 7 gün")
@@ -417,6 +420,27 @@ final class AppModel {
                 selectedBody = loaded.body; selectedHTML = loaded.html
                 selectedThread = loaded.thread; selectedMessageID = loaded.messageID
             }
+        }
+    }
+
+    /// Seçili konunun (thread) tüm mesajlarını LLM ile Türkçe özetler.
+    func summarizeThread() {
+        guard !isSummarizing, selectedThread.count > 1 else { return }
+        guard let llm = Providers.llm() else { errorMessage = AppError.noLLM.description; return }
+        let thread = selectedThread
+        let key = selectedHit?.threadKey
+        isSummarizing = true; errorMessage = nil
+        Task {
+            defer { isSummarizing = false }
+            let summary = await background { () -> String in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                let entries = try thread.map { hit in
+                    ThreadEntry(from: hit.fromName ?? hit.fromAddress, date: hit.date,
+                                body: (try store.body(forID: hit.id)) ?? hit.snippet)
+                }
+                return try ThreadSummarizer(llm: llm).summarize(entries)
+            }
+            if let summary { threadSummary = summary; summaryThreadKey = key }
         }
     }
 

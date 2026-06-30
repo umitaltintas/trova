@@ -1047,11 +1047,32 @@ private struct ReadingPane: View {
 private struct ThreadStrip: View {
     @Environment(AppModel.self) private var model
 
+    private var showSummary: Bool {
+        model.threadSummary != nil && model.summaryThreadKey == model.selectedHit?.threadKey
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("BU KONUDA \(model.selectedThread.count) MAIL")
-                .font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.faint).tracking(0.6)
-                .padding(.horizontal, 16).padding(.top, 8)
+            HStack {
+                Text("BU KONUDA \(model.selectedThread.count) MAIL")
+                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.faint).tracking(0.6)
+                Spacer()
+                if model.isSummarizing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button { model.summarizeThread() } label: {
+                        Label("Konuyu özetle", systemImage: "text.append")
+                    }
+                    .buttonStyle(.plain).font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.accent)
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 8)
+
+            if showSummary, let summary = model.threadSummary {
+                ThreadSummaryCard(summary: summary)
+                    .padding(.horizontal, 16).padding(.vertical, 4)
+            }
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(model.selectedThread) { message in
@@ -1078,6 +1099,37 @@ private struct ThreadStrip: View {
                 .padding(.horizontal, 16).padding(.bottom, 10)
             }
         }
+    }
+}
+
+/// "Konuyu özetle" çıktısını gösteren, kopyalanabilir markdown kartı.
+private struct ThreadSummaryCard: View {
+    let summary: String
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("Konu özeti", systemImage: "sparkles")
+                    .font(.rounded(12, .semibold)).foregroundStyle(Theme.accent)
+                Spacer()
+                Button { Exporter.copy(summary); copied = true } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.plain).foregroundStyle(Theme.accent).font(.system(size: 11))
+                .help("Özeti panoya kopyala")
+            }
+            Text(markdown).font(.system(size: 12)).foregroundStyle(Theme.ink)
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.radius))
+    }
+
+    private var markdown: AttributedString {
+        (try? AttributedString(markdown: summary,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(summary)
     }
 }
 
