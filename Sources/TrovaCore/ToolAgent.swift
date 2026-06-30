@@ -282,6 +282,10 @@ public struct ToolAgent {
             return ("Ek: \(chosen.filename) (\(chosen.mimeType))\n\(text)",
                     AgentStep(kind: .read, detail: "ek: \(chosen.filename)"), [hit])
 
+        case "overview":
+            return (overview(),
+                    AgentStep(kind: .note, detail: "posta kutusu özeti"), [])
+
         case "remember":
             let fact = (args["fact"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !fact.isEmpty else {
@@ -295,6 +299,33 @@ public struct ToolAgent {
         default:
             return ("Bilinmeyen araç: \(call.name)", AgentStep(kind: .note, detail: call.name), [])
         }
+    }
+
+    /// `overview` aracı: posta kutusunun genel istatistiğini store'dan toplayıp Türkçe
+    /// kısa bir metin olarak üretir. `now`/`calendar` enjekte edilebildiğinden deterministik
+    /// test edilebilir; biçimlendirme saf `overviewText` fonksiyonuna devredilir.
+    func overview(now: Date = Date(), calendar: Calendar = .current, months: Int = 6) -> String {
+        let total = (try? store.count()) ?? 0
+        let accounts = (try? store.accountCounts())?.count ?? 0
+        let withAttachments = (try? store.attachmentCount()) ?? 0
+        let monthly = (try? store.monthlyCounts(months: months, now: now, calendar: calendar)) ?? []
+        return Self.overviewText(total: total, accounts: accounts,
+                                 withAttachments: withAttachments, monthly: monthly)
+    }
+
+    /// `overview` metnini üreten saf biçimlendirici (I/O içermez → kolayca test edilir).
+    static func overviewText(total: Int, accounts: Int, withAttachments: Int,
+                             monthly: [MonthCount]) -> String {
+        var text = "Toplam \(total) mail, \(accounts) hesap. \(withAttachments) mailde ek var."
+        if !monthly.isEmpty {
+            let dağılım = monthly.map { "\($0.month): \($0.count)" }.joined(separator: ", ")
+            text += " Son \(monthly.count) ayın aylık dağılımı: \(dağılım)."
+            // En yoğun ayı yalnızca anlamlıysa ekle (eşitlikte en yeni ay seçilir).
+            if let peak = monthly.max(by: { $0.count < $1.count }), peak.count > 0 {
+                text += " En yoğun ay: \(peak.month) (\(peak.count))."
+            }
+        }
+        return text
     }
 
     private func describe(handle: String, hit: SearchHit) -> String {
@@ -316,6 +347,7 @@ public struct ToolAgent {
         - find_by_sender: bir göndericiden gelen mailleri ve toplam sayıyı getir.
         - list_thread / summarize_thread: bir konunun mailleri (özet listesi / tam gövdeler).
         - read_attachment: PDF/görsel/metin ekten içerik çıkar (fatura, fiş, sözleşme için — OCR dahil).
+        - overview: posta kutusu genel istatistiği (toplam mail, hesaplar, ekler, aylık dağılım).
         - remember: kullanıcı hakkında kalıcı, gelecekte işe yarayacak bir bilgiyi sakla
           (tercih, tekrarlayan kişi/proje, "haber bültenlerini hep özetle" gibi kalıcı talimat).
           Sadece gerçekten kalıcı bilgiler için kullan; geçici sonuçları kaydetme.
@@ -398,6 +430,16 @@ public struct ToolAgent {
                     "filename": ["type": "string", "description": "Belirli bir ek adı (opsiyonel; yoksa ilk ek)"],
                 ],
                 "required": ["handle"],
+            ],
+        ]],
+        ["type": "function", "function": [
+            "name": "overview",
+            "description": "Posta kutusunun genel istatistiğini döndürür "
+                + "(toplam mail, hesap sayısı, ekli mail sayısı, son ayların aylık dağılımı). "
+                + "Parametre almaz.",
+            "parameters": [
+                "type": "object",
+                "properties": [String: Any](),
             ],
         ]],
         ["type": "function", "function": [
