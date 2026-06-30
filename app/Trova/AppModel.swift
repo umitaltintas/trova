@@ -301,6 +301,21 @@ final class AppModel {
         MarkdownExporter.emailList(title: "Benzer mailler", items: listItems(similarMails))
     }
 
+    /// Arama sonuçlarını elektronik tabloya uygun CSV'ye döker (Markdown ile aynı listeyi izler).
+    func exportSearchResultsCSV() -> String {
+        CsvExporter.emailList(listItems(displayedResults))
+    }
+
+    /// Seçili kişinin maillerini CSV'ye döker.
+    func exportPersonMailsCSV() -> String {
+        CsvExporter.emailList(listItems(personMails))
+    }
+
+    /// "Benzer mailler" listesini CSV'ye döker.
+    func exportSimilarCSV() -> String {
+        CsvExporter.emailList(listItems(similarMails))
+    }
+
     func cancelJob() {
         cancelFlag?.cancel()
         currentTask?.cancel()

@@ -417,6 +417,7 @@ private struct SearchColumn: View {
                     }
                     .labelsHidden().pickerStyle(.menu).controlSize(.small).fixedSize()
                     ListExportMenu(markdown: { model.exportSearchResults() },
+                                   csv: { model.exportSearchResultsCSV() },
                                    filename: model.query.isEmpty ? "Arama sonuçları" : "Arama \(model.query)",
                                    labelText: "Sonuçları dışa aktar")
                 }
@@ -906,10 +907,11 @@ private struct ExportBar: View {
     }
 }
 
-/// Bir mail listesini (arama sonuçları / kişi mailleri / benzer mailler) Markdown'a
-/// kopyalama veya .md kaydetme için kompakt menü. Dar başlıklarda taşmaması için tek düğmedir.
+/// Bir mail listesini (arama sonuçları / kişi mailleri / benzer mailler) Markdown ya da CSV olarak
+/// kopyalama/kaydetme için kompakt menü. Dar başlıklarda taşmaması için tek düğmedir.
 private struct ListExportMenu: View {
     let markdown: () -> String
+    let csv: () -> String
     let filename: String
     var labelText = "Dışa aktar"
     @State private var copied = false
@@ -922,6 +924,13 @@ private struct ListExportMenu: View {
             Button {
                 Exporter.save(markdown(), suggestedName: filename)
             } label: { Label(".md kaydet", systemImage: "square.and.arrow.down") }
+            Divider()
+            Button {
+                Exporter.copy(csv()); copied = true
+            } label: { Label("CSV kopyala", systemImage: "doc.on.doc") }
+            Button {
+                Exporter.saveCSV(csv(), suggestedName: filename)
+            } label: { Label("CSV (.csv) kaydet", systemImage: "tablecells") }
         } label: {
             Label(copied ? "Kopyalandı" : labelText,
                   systemImage: copied ? "checkmark" : "square.and.arrow.up")
@@ -929,7 +938,7 @@ private struct ListExportMenu: View {
         }
         .menuStyle(.borderlessButton).fixedSize()
         .foregroundStyle(Theme.accent)
-        .help("Listeyi Markdown olarak dışa aktar")
+        .help("Listeyi Markdown ya da CSV olarak dışa aktar")
     }
 }
 
@@ -1159,6 +1168,7 @@ private struct PersonDetailHeader: View {
                 Spacer()
                 if !model.personMails.isEmpty {
                     ListExportMenu(markdown: { model.exportPersonMails() },
+                                   csv: { model.exportPersonMailsCSV() },
                                    filename: person?.name ?? address)
                 }
                 Button { model.composeNew(to: address) } label: {
@@ -1578,7 +1588,8 @@ private struct SimilarMailsSheet: View {
                 }
                 Spacer()
                 if !model.isLoadingSimilar && !model.similarMails.isEmpty {
-                    ListExportMenu(markdown: { model.exportSimilar() }, filename: "Benzer mailler")
+                    ListExportMenu(markdown: { model.exportSimilar() },
+                                   csv: { model.exportSimilarCSV() }, filename: "Benzer mailler")
                 }
                 Button { model.showSimilarSheet = false } label: {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundStyle(Theme.muted)

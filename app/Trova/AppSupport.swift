@@ -22,14 +22,27 @@ enum Exporter {
         }
     }
 
-    /// Başlıktan güvenli bir dosya adı üretir (.md uzantılı).
-    static func safeFilename(_ base: String) -> String {
+    /// CSV metnini bir .csv dosyasına kaydeder (NSSavePanel, virgülle ayrılmış değer türü).
+    @MainActor
+    static func saveCSV(_ text: String, suggestedName: String) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = safeFilename(suggestedName, ext: "csv")
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK, let url = panel.url {
+            // CsvExporter zaten başa UTF-8 BOM koyuyor; metni olduğu gibi yaz.
+            try? text.data(using: .utf8)?.write(to: url)
+        }
+    }
+
+    /// Başlıktan güvenli bir dosya adı üretir (varsayılan `.md`, istenirse başka uzantı).
+    static func safeFilename(_ base: String, ext: String = "md") -> String {
         let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
         let source = trimmed.isEmpty ? "trova-not" : trimmed
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: " -_"))
         let mapped = source.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
         let safe = String(mapped).prefix(50).trimmingCharacters(in: .whitespaces)
-        return "\(safe.isEmpty ? "trova-not" : safe).md"
+        return "\(safe.isEmpty ? "trova-not" : safe).\(ext)"
     }
 }
 
