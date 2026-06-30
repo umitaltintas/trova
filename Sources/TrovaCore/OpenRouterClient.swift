@@ -161,6 +161,112 @@ public final class OpenRouterClient: @unchecked Sendable {
         return full
     }
 
+    // MARK: - Streaming + araç çağırma (ajan döngüsü için canlı yanıt)
+
+    /// SSE akışını parça parça biriktirip sonunda `chatRaw` ile AYNI şekilde bir `ChatResponse`
+    /// üretebilen SAF toplayıcı (ağ yok → test edilebilir). OpenRouter `delta` içinde `content`
+    /// (string parçaları) ve `tool_calls` (`{index,id?,type?,function:{name?,arguments?}}`) gönderir;
+    /// argümanlar parça parça gelir ve `index`'e göre birikir.
+    struct StreamAccumulator {
+        private var content = ""
+        private(set) var finishReason: String?
+        private(set) var isDone = false
+
+        /// Tek bir tool_call'un parça parça biriken hâli.
+        private struct PartialToolCall { var id: String?; var name: String?; var arguments = "" }
+        private var partials: [Int: PartialToolCall] = [:]
+        private var order: [Int] = []   // index'lerin ilk görülme sırasını koru
+
+        /// Bir SSE `data:` satırını işler; yeni içerik parçası varsa onu döndürür (UI'a iletmek için).
+        /// `[DONE]`, `data:` olmayan ve çözümlenemeyen satırlar güvenle yok sayılır.
+        mutating func consume(line: String) -> String? {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("data:") else { return nil }
+            let payload = trimmed.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+            if payload == "[DONE]" { isDone = true; return nil }
+            guard let data = payload.data(using: .utf8),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = root["choices"] as? [[String: Any]],
+                  let choice = choices.first else { return nil }
+            if let reason = choice["finish_reason"] as? String { finishReason = reason }
+            guard let delta = choice["delta"] as? [String: Any] else { return nil }
+
+            var emitted: String?
+            if let fragment = delta["content"] as? String, !fragment.isEmpty {
+                content += fragment
+                emitted = fragment
+            }
+            if let calls = delta["tool_calls"] as? [[String: Any]] {
+                for call in calls {
+                    let index = (call["index"] as? Int) ?? 0
+                    if partials[index] == nil { partials[index] = PartialToolCall(); order.append(index) }
+                    if let id = call["id"] as? String { partials[index]?.id = id }
+                    if let function = call["function"] as? [String: Any] {
+                        if let name = function["name"] as? String { partials[index]?.name = name }
+                        if let args = function["arguments"] as? String { partials[index]?.arguments += args }
+                    }
+                }
+            }
+            return emitted
+        }
+
+        /// Biriken durumu `chatRaw`'ınkiyle AYNI biçimde bir `ChatResponse`'a dönüştürür:
+        /// tam content, sıralı `toolCalls` ve history'ye aynen eklenebilen `rawAssistantMessage`.
+        func response() -> ChatResponse {
+            var calls: [ToolCall] = []
+            var rawToolCalls: [[String: Any]] = []
+            for index in order {
+                guard let partial = partials[index] else { continue }
+                let id = partial.id ?? "call_\(index)"
+                let name = partial.name ?? ""
+                let arguments = partial.arguments.isEmpty ? "{}" : partial.arguments
+                calls.append(ToolCall(id: id, name: name, arguments: arguments))
+                rawToolCalls.append(["id": id, "type": "function",
+                                     "function": ["name": name, "arguments": arguments]])
+            }
+            var raw: [String: Any] = ["role": "assistant",
+                                      "content": content.isEmpty ? NSNull() : content]
+            if !rawToolCalls.isEmpty { raw["tool_calls"] = rawToolCalls }
+            return ChatResponse(content: content.isEmpty ? nil : content,
+                                toolCalls: calls, rawAssistantMessage: raw)
+        }
+    }
+
+    /// `chatRaw`'ın akışlı (SSE) eşi: araç çağırma destekli, içerik parçalarını sırayla `onContentDelta`'ya
+    /// iletir ve akış bitince `chatRaw` ile AYNI şekilde bir `ChatResponse` döndürür (history'ye eklenen
+    /// `rawAssistantMessage` dâhil). `completeStreaming`'in `URLSession.bytes` + hata/iptal desenini izler.
+    public func streamChatRaw(messages: [[String: Any]], tools: [[String: Any]]? = nil,
+                              temperature: Double = 0.2,
+                              onContentDelta: @Sendable @escaping (String) async -> Void)
+        async throws -> ChatResponse {
+        var request = URLRequest(url: config.baseURL.appendingPathComponent("chat/completions"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
+        var payload: [String: Any] = [
+            "model": config.model, "temperature": temperature, "stream": true, "messages": messages,
+        ]
+        if let tools, !tools.isEmpty {
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (bytes, response) = try await session.bytes(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            var body = ""
+            for try await line in bytes.lines { body += line }
+            throw LLMError.badResponse("HTTP \(http.statusCode): \(body)")
+        }
+
+        var accumulator = StreamAccumulator()
+        for try await line in bytes.lines {
+            if let fragment = accumulator.consume(line: line) { await onContentDelta(fragment) }
+            if accumulator.isDone { break }
+        }
+        return accumulator.response()
+    }
+
     public static func fromEnvironment(
         _ env: [String: String] = ProcessInfo.processInfo.environment
     ) -> OpenRouterClient? {

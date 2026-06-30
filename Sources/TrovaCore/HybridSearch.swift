@@ -7,7 +7,7 @@ public enum SearchMode: String, Sendable, CaseIterable {
 }
 
 /// FTS5 ve vektör aramasını birleştiren arama servisi.
-public struct Searcher {
+public struct Searcher: Sendable {
     let store: IndexStore
     let embedder: EmbeddingProvider?
     let reranker: Reranker?

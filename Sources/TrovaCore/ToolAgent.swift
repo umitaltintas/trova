@@ -38,7 +38,7 @@ public struct ChatTurn: Sendable {
 
 /// Çok adımlı, araç kullanan mail ajanı (OpenRouter function-calling).
 /// Soruyu yanıtlamak için arar, mail okur, bulduğuna göre yeniden arar; bitince yanıtlar.
-public struct ToolAgent {
+public struct ToolAgent: Sendable {
     let store: IndexStore
     let searcher: Searcher
     let llm: OpenRouterClient
@@ -109,6 +109,80 @@ public struct ToolAgent {
         progress(AgentStep(kind: .answer, detail: ""))
         return finish(question: question, answer: final.content ?? "",
                       steps: steps, cited: cited, verify: verify, progress: progress)
+    }
+
+    /// `run()`'ın AKIŞLI (streaming) eşi: aynı döngü mantığını birebir aynalar ama `chatRaw`
+    /// yerine `streamChatRaw` kullanır ve nihai yanıtın içerik parçalarını token token
+    /// `onAnswerDelta`'ya iletir. Tool dispatch, memory enjeksiyonu, cited toplama, verify,
+    /// maxSteps ve `AgentRun` üretimi `run()` ile BİREBİR aynı davranır (aynı `execute`/`finish`
+    /// yardımcılarını paylaşır). Ara tool-call turlarında içerik ~boş olduğundan delta akmaz;
+    /// nihai `AgentRun.answer` son turun tam içeriğidir.
+    public func runStreaming(_ question: String,
+                             history: [ChatTurn] = [],
+                             cancel: CancellationFlag? = nil,
+                             verify: Bool = false,
+                             progress: @Sendable @escaping (AgentStep) -> Void = { _ in },
+                             onAnswerDelta: @Sendable @escaping (String) async -> Void)
+        async throws -> AgentRun {
+        var messages = makeInitialMessages(question: question, history: history)
+        var handles: [String: SearchHit] = [:]
+        var counter = 0
+        var steps: [AgentStep] = []
+        var cited: [SearchHit] = []
+        var citedSeen = Set<String>()
+
+        for _ in 0..<maxSteps {
+            if cancel?.isCancelled == true {
+                return AgentRun(answer: "İptal edildi.", steps: steps, cited: cited, verification: nil)
+            }
+            let response = try await llm.streamChatRaw(messages: messages, tools: Self.tools,
+                                                       onContentDelta: onAnswerDelta)
+
+            guard !response.toolCalls.isEmpty else {
+                progress(AgentStep(kind: .answer, detail: ""))
+                return finish(question: question, answer: response.content ?? "",
+                              steps: steps, cited: cited, verify: verify, progress: progress)
+            }
+
+            messages.append(response.rawAssistantMessage)
+            for call in response.toolCalls {
+                let outcome = execute(call, handles: &handles, counter: &counter)
+                steps.append(outcome.step)
+                progress(outcome.step)
+                for hit in outcome.touched where !citedSeen.contains(hit.id) {
+                    citedSeen.insert(hit.id); cited.append(hit)
+                }
+                messages.append(["role": "tool", "tool_call_id": call.id, "content": outcome.result])
+            }
+        }
+
+        // Adım sınırına ulaşıldı → araçsız son yanıt iste (yine akıtarak).
+        messages.append(["role": "user",
+                         "content": "Adım sınırına ulaşıldı. Şimdiye dek bulduklarınla Türkçe net bir yanıt ver."])
+        let final = try await llm.streamChatRaw(messages: messages, tools: nil,
+                                                onContentDelta: onAnswerDelta)
+        progress(AgentStep(kind: .answer, detail: ""))
+        return finish(question: question, answer: final.content ?? "",
+                      steps: steps, cited: cited, verify: verify, progress: progress)
+    }
+
+    /// Sistem istemini (kalıcı hafıza enjeksiyonu dâhil), geçmiş turları ve güncel soruyu içeren
+    /// başlangıç mesaj dizisini kurar. `runStreaming` bunu kullanır; `run()` aynı kurulumu satır içi
+    /// yapar (senkron yol byte-identik korunduğu için ayrı tutulur).
+    private func makeInitialMessages(question: String, history: [ChatTurn]) -> [[String: Any]] {
+        let memories = (try? store.allMemories()) ?? []
+        var systemContent = Self.systemPrompt
+        if !memories.isEmpty {
+            let recalled = memories.map { "- \($0.text)" }.joined(separator: "\n")
+            systemContent += "\n\nHATIRLADIKLARIN (önceki oturumlardan):\n\(recalled)"
+        }
+        var messages: [[String: Any]] = [["role": "system", "content": systemContent]]
+        for turn in history {
+            messages.append(["role": "user", "content": turn.question])
+            messages.append(["role": "assistant", "content": turn.answer])
+        }
+        messages.append(["role": "user", "content": question])
+        return messages
     }
 
     /// Nihai yanıtı paketler; `verify` açıksa ve yanıt boş değilse ek bir doğrulama

@@ -666,6 +666,11 @@ final class AppModel {
         conversation.append(Exchange(question: q))
         let index = conversation.count - 1
 
+        // Canlı akış ayarı: anahtar hiç yazılmamışsa varsayılan AÇIK.
+        let defaults = UserDefaults.standard
+        let streaming = defaults.object(forKey: SettingsKeys.streamAnswers) == nil
+            ? true : defaults.bool(forKey: SettingsKeys.streamAnswers)
+
         isAsking = true; errorMessage = nil
         let flag = CancellationFlag(); cancelFlag = flag
         currentTask = Task {
@@ -673,18 +678,44 @@ final class AppModel {
                 isAsking = false; currentTask = nil; cancelFlag = nil
                 if index < conversation.count { conversation[index].running = false }
             }
-            let run = await background { () -> AgentRun in
-                let store = try IndexStore(path: AppPaths.databaseURL)
-                let agent = ToolAgent(store: store, embedder: Providers.embedder(),
-                                      llm: llm, reranker: Providers.reranker(),
-                                      maxPerThread: Retrieval.maxPerThread())
-                return try agent.run(q, history: history, cancel: flag, verify: verify) { step in
-                    Task { @MainActor in
-                        if index < self.conversation.count { self.conversation[index].steps.append(step) }
-                    }
+            // Ajan adımlarını (search/read/…) canlı olarak ilgili tura işler (iki yol da paylaşır).
+            let onStep: @Sendable (AgentStep) -> Void = { step in
+                Task { @MainActor in
+                    if index < self.conversation.count { self.conversation[index].steps.append(step) }
+                }
+            }
+            let run: AgentRun?
+            if streaming {
+                // Ajanı arka planda kur (bloklayıcı store açılışı), sonra yanıtı token token akıt.
+                guard let agent = await background({ () -> ToolAgent in
+                    let store = try IndexStore(path: AppPaths.databaseURL)
+                    return ToolAgent(store: store, embedder: Providers.embedder(),
+                                     llm: llm, reranker: Providers.reranker(),
+                                     maxPerThread: Retrieval.maxPerThread())
+                }) else { return }
+                do {
+                    run = try await agent.runStreaming(
+                        q, history: history, cancel: flag, verify: verify, progress: onStep,
+                        onAnswerDelta: { delta in
+                            await MainActor.run {
+                                if index < self.conversation.count { self.conversation[index].answer += delta }
+                            }
+                        })
+                } catch {
+                    errorMessage = "\(error)"; return
+                }
+            } else {
+                // Eski senkron yol (değişmedi): yanıt tamamlanınca tek seferde belirir.
+                run = await background { () -> AgentRun in
+                    let store = try IndexStore(path: AppPaths.databaseURL)
+                    let agent = ToolAgent(store: store, embedder: Providers.embedder(),
+                                          llm: llm, reranker: Providers.reranker(),
+                                          maxPerThread: Retrieval.maxPerThread())
+                    return try agent.run(q, history: history, cancel: flag, verify: verify, progress: onStep)
                 }
             }
             if let run, index < conversation.count {
+                // Akışta birikenin üzerine nihai (son tur) yanıtı kesinleştir; kaynak/doğrulamayı işle.
                 conversation[index].answer = run.answer
                 conversation[index].cited = run.cited
                 conversation[index].verification = run.verification

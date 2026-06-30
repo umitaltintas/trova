@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKeys.verify) private var verify = false
     @AppStorage(SettingsKeys.diversify) private var diversify = true
     @AppStorage(SettingsKeys.queryExpansion) private var queryExpansion = false
+    @AppStorage(SettingsKeys.streamAnswers) private var streamAnswers = true
 
     @Environment(AppModel.self) private var model
 
@@ -70,6 +71,11 @@ struct SettingsView: View {
                 Toggle("Sorgu genişletme (PRF)", isOn: $queryExpansion)
                 Text("İlk sonuçların sık terimlerini sorguya ekleyerek kelime dağarcığı boşluklarını "
                    + "kapatır (recall artar). Eklenen terimler arama üstünde çip olarak gösterilir.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("Yanıtı canlı akıt (streaming)", isOn: $streamAnswers)
+                Text("Sor ajanının nihai yanıtını token token, yazılır gibi canlı gösterir. "
+                   + "Kapalıyken yanıt tamamlanınca tek seferde belirir.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 Divider()

@@ -25,6 +25,57 @@ final class StreamingTests: XCTestCase {
         XCTAssertEqual(OpenRouterClient.streamEvent(fromLine: line), .ignore)
     }
 
+    // MARK: - Saf SSE tool_call biriktirici (StreamAccumulator)
+
+    /// (a) Yalnız içerik akışı → parçalar birleşir, tool yok.
+    func testAccumulatorMergesContentOnly() {
+        var acc = OpenRouterClient.StreamAccumulator()
+        XCTAssertEqual(acc.consume(line: #"data: {"choices":[{"delta":{"content":"Mer"}}]}"#), "Mer")
+        XCTAssertEqual(acc.consume(line: #"data: {"choices":[{"delta":{"content":"haba"}}]}"#), "haba")
+        let resp = acc.response()
+        XCTAssertEqual(resp.content, "Merhaba")
+        XCTAssertTrue(resp.toolCalls.isEmpty)
+        XCTAssertNil(resp.rawAssistantMessage["tool_calls"])
+    }
+
+    /// (b) tool_call 3 parçaya bölünmüş: id+name ilk chunk, arguments fragmanları sonraki chunk'larda.
+    func testAccumulatorAssemblesSplitToolCall() {
+        var acc = OpenRouterClient.StreamAccumulator()
+        _ = acc.consume(line: #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"search_mail","arguments":""}}]}}]}"#)
+        _ = acc.consume(line: #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"query\":\"ki"}}]}}]}"#)
+        _ = acc.consume(line: #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ra\"}"}}]}}]}"#)
+        let resp = acc.response()
+        XCTAssertEqual(resp.toolCalls.count, 1)
+        XCTAssertEqual(resp.toolCalls[0].id, "c1")
+        XCTAssertEqual(resp.toolCalls[0].name, "search_mail")
+        XCTAssertEqual(resp.toolCalls[0].arguments, #"{"query":"kira"}"#)
+        XCTAssertNil(resp.content)   // içerik gelmedi → nil
+        // rawAssistantMessage history'ye aynen eklenebilir (assistant + tool_calls) olmalı.
+        XCTAssertEqual(resp.rawAssistantMessage["role"] as? String, "assistant")
+        XCTAssertNotNil(resp.rawAssistantMessage["tool_calls"])
+    }
+
+    /// (c) finish_reason "tool_calls" vs "stop" ayrımı yakalanır.
+    func testAccumulatorCapturesFinishReason() {
+        var toolAcc = OpenRouterClient.StreamAccumulator()
+        _ = toolAcc.consume(line: #"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#)
+        XCTAssertEqual(toolAcc.finishReason, "tool_calls")
+
+        var stopAcc = OpenRouterClient.StreamAccumulator()
+        _ = stopAcc.consume(line: #"data: {"choices":[{"delta":{"content":"bitti"},"finish_reason":"stop"}]}"#)
+        XCTAssertEqual(stopAcc.finishReason, "stop")
+    }
+
+    /// (d) `[DONE]` sonlandırıcı + data olmayan satırlar güvenle yok sayılır.
+    func testAccumulatorHandlesDoneSentinel() {
+        var acc = OpenRouterClient.StreamAccumulator()
+        XCTAssertFalse(acc.isDone)
+        XCTAssertNil(acc.consume(line: "data: [DONE]"))
+        XCTAssertTrue(acc.isDone)
+        XCTAssertNil(acc.consume(line: ": keep-alive"))
+        XCTAssertNil(acc.consume(line: ""))
+    }
+
     // MARK: - completeStreaming (MockURLProtocol ile uçtan uca)
 
     private func session() -> URLSession {
