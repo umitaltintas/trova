@@ -173,4 +173,47 @@ final class PruneTests: XCTestCase {
         XCTAssertEqual(result.removed, 0)
         XCTAssertEqual(try store.count(), 2)   // prune kapalı → satır korunur
     }
+
+    /// KRİTİK güvenlik değişmezi: hiç `.emlx` GÖRÜLMEYEN (boş/erişilemeyen kök) tam bir tarama
+    /// ASLA satır silmez. `seen` boş kalırsa `pruneMissing(keepIDs: [])` TÜM indeksi süpürürdü;
+    /// Indexer'ın guard'ı bunu engeller. (En felaket senaryo — daha önce Indexer seviyesinde
+    /// doğrudan test edilmiyordu.)
+    func testEmptyRootDoesNotPruneEverything() throws {
+        let (root, messages) = try tempRoot()
+        try writeEMLX(messages, name: "1.emlx", subject: "Bir", messageID: "<m1@host>")
+        try writeEMLX(messages, name: "2.emlx", subject: "İki", messageID: "<m2@host>")
+
+        let store = try makeStore()
+        _ = try Indexer.run(store: store, root: root)
+        XCTAssertEqual(try store.count(), 2)
+
+        // Geçerli ama BOŞ (hiç .emlx içermeyen) bir kök → discoverMessages [] döner → seen boş.
+        let emptyRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("trova-prune-empty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: emptyRoot, withIntermediateDirectories: true)
+
+        let result = try Indexer.run(store: store, root: emptyRoot)   // pruneMissing varsayılan: true
+        XCTAssertEqual(result.removed, 0)            // boş `seen` → silme YOK
+        XCTAssertEqual(try store.count(), 2)         // indeks olduğu gibi korunur (felaket önlendi)
+    }
+
+    // MARK: - Prune güvenlik yüklemi (saf — Indexer.shouldPrune)
+
+    /// Yalnız "tam + iptal yok + limit yok + en az bir dosya görüldü + pruneMissing açık" durumunda
+    /// prune güvenlidir; her ihlal eden kombinasyon `false` döner (her biri `seen`'i eksik bırakabilir).
+    func testShouldPruneTruthTable() {
+        // Tüm koşullar sağlanırsa → güvenli.
+        XCTAssertTrue(Indexer.shouldPrune(
+            pruneMissing: true, limit: nil, cancelled: false, seenIsEmpty: false))
+
+        // Her bir koşulun ihlali tek başına prune'u engeller.
+        XCTAssertFalse(Indexer.shouldPrune(
+            pruneMissing: false, limit: nil, cancelled: false, seenIsEmpty: false), "pruneMissing kapalı")
+        XCTAssertFalse(Indexer.shouldPrune(
+            pruneMissing: true, limit: 100, cancelled: false, seenIsEmpty: false), "limit verildi")
+        XCTAssertFalse(Indexer.shouldPrune(
+            pruneMissing: true, limit: nil, cancelled: true, seenIsEmpty: false), "iptal edildi")
+        XCTAssertFalse(Indexer.shouldPrune(
+            pruneMissing: true, limit: nil, cancelled: false, seenIsEmpty: true), "hiç dosya görülmedi")
+    }
 }

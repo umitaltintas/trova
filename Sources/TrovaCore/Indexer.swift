@@ -153,17 +153,24 @@ public enum Indexer {
         progress?(result.processed, total)
 
         // Prune (silinen mailleri DB'den düş): YALNIZ tam, iptal edilmemiş, limit'siz bir taramada.
-        // Aşağıdaki koşullardan herhangi biri varsa `seen` EKSİK olabilir → asla silme (yanlışlıkla
-        // tüm DB'yi süpürme felaketini önler):
-        //  • pruneMissing kapalı (örn. FSEvents/autoSync kısmi-davranış kaygısı),
-        //  • iptal edildi (kullanıcı durdurdu — kalan dosyalar görülmedi),
-        //  • limit verildi (yalnız ilk N dosya gezildi),
-        //  • hiç dosya görülmedi (boş/erişim sorunu — boş `seen` ile her şeyi silmeyiz).
-        let completed = cancel?.isCancelled != true
-        if pruneMissing, limit == nil, completed, !seen.isEmpty {
+        // Karar tek bir saf yüklemde toplanır (aşağıdaki `shouldPrune`) — DB'yi yanlışlıkla süpürme
+        // felaketini önleyen kritik değişmez bağımsızca test edilebilsin diye.
+        if Self.shouldPrune(pruneMissing: pruneMissing, limit: limit,
+                            cancelled: cancel?.isCancelled == true, seenIsEmpty: seen.isEmpty) {
             result.removed = try store.pruneMissing(keepIDs: seen)
         }
         return result
+    }
+
+    /// Silinen mailleri temizlemenin (prune) GÜVENLİ olup olmadığını söyleyen saf yüklem.
+    /// Yalnızca AŞAĞIDAKİLERİN TÜMÜ sağlanınca `true` döner; herhangi biri ihlal edilirse `seen`
+    /// kümesi EKSİK olabilir → asla silinmez (yanlışlıkla tüm indeksi süpürme felaketini önler):
+    ///  • `pruneMissing` açık (FSEvents/autoSync kısmi-davranış kaygısıyla kapatılabilir),
+    ///  • `limit` yok (limit'li tarama yalnız ilk N dosyayı gezer → `seen` eksik),
+    ///  • iptal edilmemiş (kullanıcı durdurursa kalan dosyalar görülmemiştir),
+    ///  • en az bir dosya görülmüş (`seen` boşsa — boş/erişim sorunu — hiçbir şey silmeyiz).
+    static func shouldPrune(pruneMissing: Bool, limit: Int?, cancelled: Bool, seenIsEmpty: Bool) -> Bool {
+        pruneMissing && limit == nil && !cancelled && !seenIsEmpty
     }
 
     /// Ek içeriği backfill geçişi (opt-in toggle AÇIKken kullanıcı tetikler): eki olan TÜM
