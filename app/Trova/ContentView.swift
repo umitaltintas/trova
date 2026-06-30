@@ -23,10 +23,28 @@ struct ContentView: View {
                 else { SearchColumn() }
             }
             // Kolon min'leri düşürüldü ki dar pencerede içerik sarmalanıp akabilsin (kırpılmasın).
-            .navigationSplitViewColumnWidth(min: 320, ideal: 440)
+            .navigationSplitViewColumnWidth(min: 300, ideal: 440)
         } detail: {
             ReadingPane()
-                .navigationSplitViewColumnWidth(min: 340, ideal: 480)
+                .navigationSplitViewColumnWidth(min: 300, ideal: 480)
+        }
+        // Birincil eylemler artık standart macOS toolbar'ında (.primaryAction → başlık çubuğunun
+        // sağ üstü). Böylece AppKit'in sol-üstte trafik ışıkları için ayırdığı alana çakışmazlar;
+        // pencere de gerçek bir başlık çubuğuna kavuşur (içerik trafik ışıklarının altına kaymaz).
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { model.runIndex() } label: {
+                    Label("İndeksle", systemImage: "tray.and.arrow.down")
+                }
+                .disabled(model.busy || !model.hasAccess)
+                .help("Yeni mailleri indeksle")
+
+                Button { model.runEmbed() } label: {
+                    Label("Gömme", systemImage: "wand.and.stars")
+                }
+                .disabled(model.busy)
+                .help("Vektör gömmelerini üret")
+            }
         }
         .task { model.onAppear(); if autoSync { model.setAutoSync(true) } }
         .onChange(of: scenePhase) { _, phase in
@@ -94,6 +112,13 @@ private struct Sidebar: View {
 
     var body: some View {
         @Bindable var model = model
+        // Tüm kenar çubuğu içeriği bir ScrollView içinde: pencere yüksekliği küçük olduğunda
+        // içerik KIRPILMAK yerine KAYDIRILIR; hiçbir üst kontrol erişilemez kalmaz. Bölüm
+        // navigasyonu (ModeButton'lar) scroll'un en başında olduğundan her zaman erişilebilir.
+        // GeometryReader + minHeight: uzun pencerede mevcut "alt sabit" yerleşimi (Sağlık +
+        // Otomatik senkron en altta) korur; kısa pencerede içerik doğal boyuna büyüyüp kaydırılır.
+        GeometryReader { geo in
+        ScrollView {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 8) {
                 Image(systemName: "tray.full.fill")
@@ -128,7 +153,7 @@ private struct Sidebar: View {
 
             StatusBlock()
             FilterBlock()
-            Spacer()
+            Spacer(minLength: 16)
 
             HealthPill()
 
@@ -140,7 +165,11 @@ private struct Sidebar: View {
             .onChange(of: autoSync) { _, on in model.setAutoSync(on) }
         }
         .padding(14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // minHeight = görünür alan: içerik kısaysa Spacer alt blokları aşağı iter (mevcut görünüm);
+        // içerik uzunsa doğal boyuna büyür ve ScrollView devreye girip kaydırır (kırpmaz).
+        .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
+        }
+        }
     }
 }
 
@@ -251,12 +280,8 @@ private struct StatusBlock: View {
                 Label("Erişim gerekli", systemImage: "lock.fill")
                     .font(.system(size: 11)).foregroundStyle(.orange)
             }
-            HStack(spacing: 6) {
-                ActionButton(title: "İndeksle", icon: "tray.and.arrow.down",
-                             disabled: model.busy || !model.hasAccess) { model.runIndex() }
-                ActionButton(title: "Gömme", icon: "wand.and.stars",
-                             disabled: model.busy) { model.runEmbed() }
-            }
+            // İndeksle / Gömme eylemleri pencere toolbar'ına (.primaryAction) taşındı; burada
+            // yalnızca ilerleme/iptal durumu gösterilir.
             if model.busy {
                 ProgressView(value: model.jobTotal > 0 ? Double(model.jobProcessed) : nil,
                              total: Double(max(model.jobTotal, 1)))
@@ -312,21 +337,6 @@ private struct StatRow: View {
             Spacer()
             Text(value).font(.mono(12, .medium)).foregroundStyle(Theme.ink)
         }
-    }
-}
-
-private struct ActionButton: View {
-    let title: String
-    let icon: String
-    let disabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: icon).font(.system(size: 11, weight: .medium))
-                .frame(maxWidth: .infinity)
-        }
-        .controlSize(.small).buttonStyle(.bordered).tint(Theme.accent).disabled(disabled)
     }
 }
 
