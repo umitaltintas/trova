@@ -13,11 +13,16 @@ public struct ParsedEmail: Sendable {
     public var inReplyTo: String?        // yanıtlanan Message-ID
     public var references: [String]      // konu zinciri Message-ID'leri
     public var attachments: [String]     // ek dosya adları
+    public var flags: Int?               // .emlx plist trailer'ındaki ham `flags` bitfield (yoksa nil)
+
+    /// Ham `flags` bitfield'ından çözülen okundu/bayraklı/yanıtlandı durumu (flags yoksa nil).
+    public var emailFlags: EmailFlags? { flags.map(EmailFlags.init(rawValue:)) }
 
     public init(messageID: String? = nil, fromName: String? = nil, fromAddress: String? = nil,
                 to: String? = nil, cc: String? = nil, subject: String? = nil,
                 date: Date? = nil, body: String = "",
-                inReplyTo: String? = nil, references: [String] = [], attachments: [String] = []) {
+                inReplyTo: String? = nil, references: [String] = [], attachments: [String] = [],
+                flags: Int? = nil) {
         self.messageID = messageID
         self.fromName = fromName
         self.fromAddress = fromAddress
@@ -29,6 +34,7 @@ public struct ParsedEmail: Sendable {
         self.inReplyTo = inReplyTo
         self.references = references
         self.attachments = attachments
+        self.flags = flags
     }
 }
 
@@ -47,7 +53,9 @@ public struct EmailAttachment: Sendable {
 public enum EMLXParser {
 
     public static func parse(data: Data) -> ParsedEmail {
-        parseRFC822(stripEMLXEnvelope(data))
+        var email = parseRFC822(stripEMLXEnvelope(data))
+        email.flags = extractFlags(data)   // RFC822 mesajından sonraki plist trailer'dan
+        return email
     }
 
     public static func parse(fileURL: URL) throws -> ParsedEmail {
@@ -118,6 +126,38 @@ public enum EMLXParser {
         let end = min(start + count, bytes.count)
         guard start < end else { return data }
         return Data(bytes[start..<end])
+    }
+
+    /// `.emlx` mesajının ardından gelen plist trailer'ından ham `flags` bitfield'ını çıkarır.
+    /// Zarf yoksa, trailer yoksa ya da `flags` anahtarı bulunamazsa nil döner — asla crash etmez.
+    static func extractFlags(_ data: Data) -> Int? {
+        let bytes = [UInt8](data)
+        guard let nl = bytes.firstIndex(of: 0x0A) else { return nil }
+        let firstLine = String(decoding: bytes[..<nl], as: UTF8.self)
+            .trimmingCharacters(in: .whitespaces)
+        guard let count = Int(firstLine), count > 0 else { return nil }  // zarf yoksa trailer da yok
+        let trailerStart = nl + 1 + count
+        guard trailerStart < bytes.count else { return nil }              // mesajdan sonrası boş
+        var slice = bytes[trailerStart...]
+        // Plist başlangıcına ('<') kadar olan boşluk/yeni satırları at.
+        guard let lt = slice.firstIndex(of: 0x3C) else { return nil }
+        slice = slice[lt...]
+        let trailer = Data(slice)
+
+        // 1) Tam plist ayrıştırması (en güvenli yol).
+        if let dict = try? PropertyListSerialization.propertyList(from: trailer, format: nil)
+            as? [String: Any] {
+            if let n = dict["flags"] as? Int { return n }
+            if let n = dict["flags"] as? NSNumber { return n.intValue }
+        }
+        // 2) Yedek: doğrudan <key>flags</key><integer>…</integer> desenini yakala.
+        let raw = String(decoding: trailer, as: UTF8.self)
+        if let r = raw.range(of: "<key>flags</key>\\s*<integer>(-?[0-9]+)</integer>",
+                             options: .regularExpression),
+           let numR = raw[r].range(of: "-?[0-9]+", options: .regularExpression) {
+            return Int(raw[r][numR])
+        }
+        return nil
     }
 
     // MARK: - RFC822

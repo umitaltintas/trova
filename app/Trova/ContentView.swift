@@ -322,6 +322,19 @@ private struct SearchColumn: View {
             }
             .padding(10).cardSurface().padding(.horizontal, 12).padding(.top, 12)
 
+            HStack(spacing: 6) {
+                FilterToggleChip(text: "Okunmadı", systemImage: "envelope.badge",
+                                 isOn: model.unreadOnly) {
+                    model.unreadOnly.toggle(); model.runSearch()
+                }
+                FilterToggleChip(text: "Bayraklı", systemImage: "flag.fill",
+                                 isOn: model.flaggedOnly) {
+                    model.flaggedOnly.toggle(); model.runSearch()
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 14).padding(.top, 8)
+
             if model.detectedDateLabel != nil || model.searchFromLabel != nil
                 || model.searchHasAttachment || !model.expansionChips.isEmpty {
                 HStack(spacing: 6) {
@@ -468,6 +481,7 @@ private struct ResultRow: View {
             Avatar(name: hit.fromName, email: hit.fromAddress, size: 32)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
+                    MessageBadges(isRead: hit.isRead, isFlagged: hit.isFlagged)
                     if !hit.attachments.isEmpty {
                         Image(systemName: "paperclip").font(.system(size: 10)).foregroundStyle(Theme.muted)
                     }
@@ -1169,6 +1183,7 @@ private struct ReadingPane: View {
                             }
                         }
                         Spacer()
+                        MessageBadges(isRead: hit.isRead, isFlagged: hit.isFlagged, dotSize: 9)
                         if let date = hit.date {
                             Text(date.formatted(date: .abbreviated, time: .shortened))
                                 .font(.mono(11)).foregroundStyle(Theme.muted)

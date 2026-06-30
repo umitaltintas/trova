@@ -119,6 +119,8 @@ final class AppModel {
     // Filtre
     var filterAccount = ""          // "" → tüm hesaplar (accountID)
     var dateRange: DateRange = .all
+    var unreadOnly = false          // yalnızca okunmamış mailler
+    var flaggedOnly = false         // yalnızca bayraklı mailler
 
     // Kayıtlı aramalar
     var savedSearches: [SavedSearch] = []
@@ -482,7 +484,8 @@ final class AppModel {
 
     func runSearch() {
         let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return }
+        // Arama metni yoksa bile aktif bir filtre çipi (okunmadı/bayraklı) varsa browse'a izin ver.
+        guard !raw.isEmpty || unreadOnly || flaggedOnly else { results = []; selection = nil; return }
         // Önce Gmail-tarzı operatörleri (from:/has:attachment), sonra Türkçe tarih ifadesini ayrıştır.
         let ops = SearchOperatorParser.parse(raw)
         let parsed = TurkishDateParser.parse(ops.cleaned, now: Date())
@@ -499,7 +502,8 @@ final class AppModel {
         let until = parsed.hint?.until
         let filter = SearchFilter(
             accountID: filterAccount.isEmpty ? nil : filterAccount, since: since, until: until,
-            fromContains: ops.fromContains, hasAttachment: ops.hasAttachment)
+            fromContains: ops.fromContains, hasAttachment: ops.hasAttachment,
+            unreadOnly: unreadOnly, flaggedOnly: flaggedOnly)
         // PRF (sorgu genişletme) ayarı: açıksa ilk sonuçlardan terim çıkarıp sorguya eklenir.
         let prf = UserDefaults.standard.bool(forKey: SettingsKeys.queryExpansion)
         isSearching = true; errorMessage = nil; expansionChips = []

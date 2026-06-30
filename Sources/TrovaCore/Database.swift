@@ -25,13 +25,16 @@ public struct MessageRecord: Codable, FetchableRecord, PersistableRecord, Sendab
     public var threadKey: String?      // konu gruplama anahtarı
     public var attachments: String?    // ek dosya adları, satırsonu ile birleşik (FTS için)
     public var parserVersion: Int      // parser çıktısı değişince yeniden indeksleme tetikler
+    public var isRead: Bool?           // .emlx flag'inden: okundu mu (bilinmiyorsa nil)
+    public var isFlagged: Bool?        // .emlx flag'inden: bayraklı mı (bilinmiyorsa nil)
 
     public init(id: String, messageID: String?, accountID: String, mailbox: String,
                 filePath: String, fromName: String?, fromAddress: String?, toField: String?,
                 ccField: String?, subject: String?, date: Date?, snippet: String?,
                 body: String?, indexedAt: Date, fileModified: Date? = nil,
                 inReplyTo: String? = nil, threadKey: String? = nil,
-                attachments: String? = nil, parserVersion: Int = 0) {
+                attachments: String? = nil, parserVersion: Int = 0,
+                isRead: Bool? = nil, isFlagged: Bool? = nil) {
         self.id = id
         self.messageID = messageID
         self.accountID = accountID
@@ -51,6 +54,8 @@ public struct MessageRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         self.threadKey = threadKey
         self.attachments = attachments
         self.parserVersion = parserVersion
+        self.isRead = isRead
+        self.isFlagged = isFlagged
     }
 }
 
@@ -66,6 +71,8 @@ public struct SearchHit: Sendable, Identifiable {
     public let score: Double
     public var threadKey: String? = nil
     public var attachments: [String] = []
+    public var isRead: Bool? = nil       // okundu mu (bilinmiyorsa nil → rozet gösterilmez)
+    public var isFlagged: Bool? = nil    // bayraklı mı (bilinmiyorsa nil → rozet gösterilmez)
 }
 
 /// En çok yazışılan bir kişinin özeti ("Kişiler" görünümü için).
@@ -106,13 +113,18 @@ public struct SearchFilter: Sendable, Equatable {
     public var until: Date?
     public var fromContains: String?      // gönderen adı/e-postasında geçen metin (from: operatörü)
     public var hasAttachment: Bool        // yalnızca ekli mailler (has:attachment operatörü)
+    public var unreadOnly: Bool           // yalnızca okunmamış mailler (isRead = 0)
+    public var flaggedOnly: Bool          // yalnızca bayraklı mailler (isFlagged = 1)
     public init(accountID: String? = nil, since: Date? = nil, until: Date? = nil,
-                fromContains: String? = nil, hasAttachment: Bool = false) {
+                fromContains: String? = nil, hasAttachment: Bool = false,
+                unreadOnly: Bool = false, flaggedOnly: Bool = false) {
         self.accountID = accountID; self.since = since; self.until = until
         self.fromContains = fromContains; self.hasAttachment = hasAttachment
+        self.unreadOnly = unreadOnly; self.flaggedOnly = flaggedOnly
     }
     public var isEmpty: Bool {
-        accountID == nil && since == nil && until == nil && fromContains == nil && !hasAttachment
+        accountID == nil && since == nil && until == nil && fromContains == nil
+            && !hasAttachment && !unreadOnly && !flaggedOnly
     }
 }
 
@@ -289,6 +301,14 @@ public final class IndexStore: Sendable {
                 )
                 """)
         }
+
+        // Faz 9: okunmadı/bayraklı yüzeyi — .emlx flag bitfield'ından çözülen durum.
+        // Additive: nullable kolonlar (nil = bilinmiyor); mevcut veri korunur, parser sürümü
+        // artışıyla bir kez yeniden indekslenip doldurulur.
+        migrator.registerMigration("v9_flags") { db in
+            try db.execute(sql: "ALTER TABLE message ADD COLUMN isRead INTEGER")
+            try db.execute(sql: "ALTER TABLE message ADD COLUMN isFlagged INTEGER")
+        }
         return migrator
     }
 
@@ -347,6 +367,7 @@ public final class IndexStore: Sendable {
                 SELECT m.id AS id, m.subject AS subject, m.fromName AS fromName,
                        m.fromAddress AS fromAddress, m.mailbox AS mailbox, m.date AS date,
                        m.threadKey AS threadKey, m.attachments AS attachments,
+                       m.isRead AS isRead, m.isFlagged AS isFlagged,
                        snippet(message_fts, 4, '«', '»', '…', 12) AS snip,
                        bm25(message_fts) AS score
                 FROM message_fts
@@ -373,7 +394,7 @@ public final class IndexStore: Sendable {
         try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, subject, fromName, fromAddress, mailbox, date, threadKey, attachments,
-                       snippet AS snip, 0.0 AS score
+                       isRead, isFlagged, snippet AS snip, 0.0 AS score
                 FROM message WHERE threadKey = ? ORDER BY date
                 """, arguments: [key]).map(Self.hit(from:))
         }
@@ -385,7 +406,7 @@ public final class IndexStore: Sendable {
         return try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, subject, fromName, fromAddress, mailbox, date, threadKey, attachments,
-                       snippet AS snip, 0.0 AS score
+                       isRead, isFlagged, snippet AS snip, 0.0 AS score
                 FROM message WHERE fromName LIKE ? OR fromAddress LIKE ?
                 ORDER BY date DESC LIMIT ?
                 """, arguments: [like, like, limit]).map(Self.hit(from:))
@@ -503,6 +524,7 @@ public final class IndexStore: Sendable {
                 SELECT m.id AS id, m.subject AS subject, m.fromName AS fromName,
                        m.fromAddress AS fromAddress, m.mailbox AS mailbox, m.date AS date,
                        m.threadKey AS threadKey, m.attachments AS attachments,
+                       m.isRead AS isRead, m.isFlagged AS isFlagged,
                        m.snippet AS snip, 0.0 AS score
                 FROM message m
                 JOIN (SELECT COALESCE(threadKey, id) AS tk, MAX(date) AS md
@@ -539,7 +561,7 @@ public final class IndexStore: Sendable {
         let rows = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, subject, fromName, fromAddress, mailbox, date, threadKey, attachments,
-                       snippet AS snip, 0.0 AS score
+                       isRead, isFlagged, snippet AS snip, 0.0 AS score
                 FROM message WHERE date >= ? ORDER BY date DESC
                 """, arguments: [cutoff]).map(Self.hit(from:))
         }
@@ -558,7 +580,7 @@ public final class IndexStore: Sendable {
         return try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, subject, fromName, fromAddress, mailbox, date, threadKey, attachments,
-                       snippet AS snip, 0.0 AS score
+                       isRead, isFlagged, snippet AS snip, 0.0 AS score
                 FROM message \(whereClause) ORDER BY date DESC LIMIT ?
                 """, arguments: StatementArguments(args)).map(Self.hit(from:))
         }
@@ -573,7 +595,7 @@ public final class IndexStore: Sendable {
         return try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT m.id, m.subject, m.fromName, m.fromAddress, m.mailbox, m.date, m.threadKey,
-                       m.attachments, m.snippet AS snip, 0.0 AS score
+                       m.attachments, m.isRead, m.isFlagged, m.snippet AS snip, 0.0 AS score
                 FROM message m WHERE 1=1\(clause) ORDER BY m.date DESC LIMIT ?
                 """, arguments: StatementArguments(args)).map(Self.hit(from:))
         }
@@ -740,6 +762,8 @@ public final class IndexStore: Sendable {
         if filter.hasAttachment {
             parts.append("(m.attachments IS NOT NULL AND m.attachments <> '')")
         }
+        if filter.unreadOnly { parts.append("m.isRead = 0") }
+        if filter.flaggedOnly { parts.append("m.isFlagged = 1") }
         return (parts.isEmpty ? "" : " AND " + parts.joined(separator: " AND "), args)
     }
 
@@ -750,7 +774,8 @@ public final class IndexStore: Sendable {
             id: row["id"], subject: row["subject"], fromName: row["fromName"],
             fromAddress: row["fromAddress"], mailbox: row["mailbox"], date: row["date"],
             snippet: (row["snip"] as String?) ?? "", score: (row["score"] as Double?) ?? 0,
-            threadKey: row["threadKey"], attachments: attachments)
+            threadKey: row["threadKey"], attachments: attachments,
+            isRead: row["isRead"] as Bool?, isFlagged: row["isFlagged"] as Bool?)
     }
 
     /// Kullanıcı sorgusunu güvenli bir FTS5 desenine çevirir.
@@ -864,7 +889,7 @@ extension IndexStore {
         return try dbQueue.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT id, subject, fromName, fromAddress, mailbox, date, threadKey, attachments,
-                       snippet AS snip, 0.0 AS score
+                       isRead, isFlagged, snippet AS snip, 0.0 AS score
                 FROM message WHERE id IN (\(databaseQuestionMarks(count: ids.count)))
                 """, arguments: StatementArguments(ids))
             var map: [String: SearchHit] = [:]

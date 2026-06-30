@@ -9,6 +9,39 @@ final class EMLXParserTests: XCTestCase {
         return Data("\(body.count)\n".utf8) + body
     }
 
+    /// `.emlx` zarfı + ardına `flags` içeren plist trailer ekler (Apple Mail biçimi).
+    private func wrapEMLXWithFlags(_ rfc822: String, flags: Int) -> Data {
+        let trailer = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            + "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+            + "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+            + "<plist version=\"1.0\">\n<dict>\n"
+            + "\t<key>flags</key>\n\t<integer>\(flags)</integer>\n"
+            + "\t<key>subject</key>\n\t<string>Test</string>\n"
+            + "</dict>\n</plist>\n"
+        return wrapEMLX(rfc822) + Data(trailer.utf8)
+    }
+
+    func testEMLXFlagsParsedFromTrailer() {
+        let rfc = "Subject: Bayraklı mail\r\n"
+            + "Content-Type: text/plain; charset=UTF-8\r\n\r\n"
+            + "Gövde\r\n"
+        // 0x11 = okundu + bayraklı
+        let parsed = EMLXParser.parse(data: wrapEMLXWithFlags(rfc, flags: 0x11))
+        XCTAssertEqual(parsed.flags, 0x11)
+        let flags = parsed.emailFlags
+        XCTAssertEqual(flags?.isRead, true)
+        XCTAssertEqual(flags?.isFlagged, true)
+        XCTAssertEqual(flags?.isAnswered, false)
+    }
+
+    func testEMLXNoTrailerYieldsNilFlags() {
+        let rfc = "Subject: Trailersız\r\n"
+            + "Content-Type: text/plain; charset=UTF-8\r\n\r\nGövde\r\n"
+        let parsed = EMLXParser.parse(data: wrapEMLX(rfc))   // trailer yok
+        XCTAssertNil(parsed.flags)
+        XCTAssertNil(parsed.emailFlags)
+    }
+
     func testQuotedPrintableBodyAndEncodedWordHeaders() {
         let rfc = "From: =?UTF-8?Q?=C3=9Cmit=20Alt=C4=B1nta=C5=9F?= <umit@example.com>\r\n"
             + "To: ali@example.com\r\n"

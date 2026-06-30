@@ -21,7 +21,8 @@ public final class CancellationFlag: @unchecked Sendable {
 /// Artımlı: dosya değişiklik zamanı (mtime) ve parser sürümü aynıysa yeniden ayrıştırmaz.
 public enum Indexer {
     /// Parser çıktısı değişince artır → tüm kayıtlar bir kez yeniden indekslenir.
-    public static let currentParserVersion = 1
+    /// v2: okundu/bayraklı flag'leri (.emlx plist trailer'ından) eklendi.
+    public static let currentParserVersion = 2
 
     public static func run(
         store: IndexStore,
@@ -64,6 +65,7 @@ public enum Indexer {
                 let threadKey = normalizedSubject.isEmpty ? "id:\(id)" : "s:\(normalizedSubject)"
                 let attachments = parsed.attachments.isEmpty ? nil
                     : parsed.attachments.joined(separator: "\n")
+                let flags = parsed.emailFlags   // flags yoksa nil → kolonlar NULL
                 batch.append(MessageRecord(
                     id: id,
                     messageID: parsed.messageID,
@@ -83,7 +85,9 @@ public enum Indexer {
                     inReplyTo: parsed.inReplyTo,
                     threadKey: threadKey,
                     attachments: attachments,
-                    parserVersion: currentParserVersion))
+                    parserVersion: currentParserVersion,
+                    isRead: flags?.isRead,
+                    isFlagged: flags?.isFlagged))
                 result.indexed += 1
             } catch {
                 result.failed += 1

@@ -10,6 +10,7 @@ enum Theme {
     static let line = Color.primary.opacity(0.08)
     static let surface = Color(nsColor: .windowBackgroundColor)
     static let card = Color(nsColor: .controlBackgroundColor)
+    static let amber = Color(red: 0.96, green: 0.62, blue: 0.07)   // bayrak rozeti
 
     static let radius: CGFloat = 12
     static let radiusSmall: CGFloat = 8
@@ -89,6 +90,47 @@ struct Chip: View {
         .foregroundStyle(Theme.muted)
         .padding(.horizontal, 7).padding(.vertical, 3)
         .background(Theme.line, in: Capsule())
+    }
+}
+
+/// Okunmadı/bayraklı durum rozetleri: okunmamışsa belirgin bir indigo nokta, bayraklıysa
+/// amber `flag.fill`. Yalnız ilgili durum kesinleşmişse (true) gösterilir; nil/false → gizli.
+struct MessageBadges: View {
+    let isRead: Bool?
+    let isFlagged: Bool?
+    var dotSize: CGFloat = 7
+
+    var body: some View {
+        if isRead == false {
+            Circle().fill(Theme.accent).frame(width: dotSize, height: dotSize)
+                .help("Okunmadı")
+        }
+        if isFlagged == true {
+            Image(systemName: "flag.fill").font(.system(size: dotSize + 3))
+                .foregroundStyle(Theme.amber)
+                .help("Bayraklı")
+        }
+    }
+}
+
+/// Açık/kapalı durumu olan tıklanabilir filtre çipi (okunmadı/bayraklı gibi). Aktifken indigo dolgu.
+struct FilterToggleChip: View {
+    let text: String
+    let systemImage: String
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage).font(.system(size: 9))
+                Text(text).font(.system(size: 11))
+            }
+            .foregroundStyle(isOn ? .white : Theme.muted)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(isOn ? Theme.accent : Theme.line, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 
