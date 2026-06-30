@@ -10,6 +10,17 @@ public struct ExportedTurn: Sendable {
     }
 }
 
+/// "Bugün" brifingindeki tek bir triyaj maddesi (gönderen + konu + yaş etiketi).
+/// `ageLabel` boşsa dışa aktarımda parantezli yaş bölümü gösterilmez.
+public struct DigestItem: Equatable, Sendable {
+    public let from: String
+    public let subject: String
+    public let ageLabel: String
+    public init(from: String, subject: String, ageLabel: String) {
+        self.from = from; self.subject = subject; self.ageLabel = ageLabel
+    }
+}
+
 /// Arama/AI çıktısını paylaşılabilir Markdown metnine dönüştürür (panoya kopyalama veya .md kaydı için).
 /// Saf metin üretimi — yan etkisiz, test edilebilir.
 public enum MarkdownExporter {
@@ -64,7 +75,45 @@ public enum MarkdownExporter {
         return out
     }
 
+    /// "Bugün" brifingini başlık + brifing metni + iki triyaj bölümü olarak Markdown'a döker.
+    /// Brifing boşsa atlanır ama başlık yine üretilir. Listeler boşsa bölüm yine yazılır
+    /// ve `_(yok)_` satırı eklenir (bölümler tutarlı kalsın).
+    public static func digest(title: String, briefing: String,
+                              needsReply: [DigestItem], waitingOn: [DigestItem]) -> String {
+        var out = "# \(trimmedOrPlaceholder(title, "Bugün"))\n"
+        let brief = briefing.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !brief.isEmpty { out += "\n\(brief)\n" }
+        out += digestSection("Yanıt gerekiyor", needsReply)
+        out += digestSection("Yanıt bekliyor", waitingOn)
+        out += "\n---\n_Trova ile dışa aktarıldı_\n"
+        return out
+    }
+
     // MARK: - Yardımcılar
+
+    /// Bir triyaj bölümünü başlık + maddelerle yazar; liste boşsa `_(yok)_` koyar.
+    private static func digestSection(_ heading: String, _ items: [DigestItem]) -> String {
+        var out = "\n## \(heading)\n\n"
+        guard !items.isEmpty else { return out + "_(yok)_\n" }
+        for item in items { out += "- \(digestLine(item))\n" }
+        return out
+    }
+
+    /// Tek bir triyaj maddesini `- **<gönderen>** — <konu> _(<yaş>)_` biçimine getirir.
+    /// Yaş etiketi boşsa parantezli kısım atlanır.
+    private static func digestLine(_ item: DigestItem) -> String {
+        var line = "**\(inlineClean(item.from))** — \(inlineClean(item.subject))"
+        let age = item.ageLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !age.isEmpty { line += " _(\(age))_" }
+        return line
+    }
+
+    /// Tek satırlık alanlardan (gönderen/konu) iç satır sonlarını temizler; markdown'a dokunmaz.
+    private static func inlineClean(_ s: String) -> String {
+        s.replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     private static func citationLine(_ hit: SearchHit) -> String {
         var parts = ["**\(trimmedOrPlaceholder(hit.subject ?? "", "(konu yok)"))**"]

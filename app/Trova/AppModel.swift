@@ -185,6 +185,27 @@ final class AppModel {
     /// Bir tarihin bugüne göre yaşını tam gün olarak verir (UI yaş çipleri için).
     static func ageDays(_ date: Date?) -> Int { TriageItem.ageDays(of: date) }
 
+    /// Yaşı kısa bir etikete çevirir ("bugün" / "3g") — yaş çipi ve dışa aktarım aynı biçimi paylaşır.
+    static func ageLabel(_ date: Date?) -> String {
+        let days = ageDays(date)
+        return days <= 0 ? "bugün" : "\(days)g"
+    }
+
+    /// "Bugün" brifingini (brifing metni + triyaj listeleri) paylaşılabilir Markdown'a döker.
+    func digestMarkdown() -> String {
+        func items(_ hits: [SearchHit]) -> [DigestItem] {
+            hits.map { hit in
+                DigestItem(
+                    from: hit.fromName ?? hit.fromAddress ?? "Bilinmeyen gönderen",
+                    subject: hit.subject ?? "(konu yok)",
+                    ageLabel: AppModel.ageLabel(hit.date))
+            }
+        }
+        let title = "Bugün — " + Date().formatted(date: .long, time: .omitted)
+        return MarkdownExporter.digest(title: title, briefing: digestText,
+                                       needsReply: items(needsReply), waitingOn: items(waitingOn))
+    }
+
     func cancelJob() {
         cancelFlag?.cancel()
         currentTask?.cancel()

@@ -1060,8 +1060,17 @@ private struct DigestCard: View {
             if !model.digestText.isEmpty {
                 AnswerCard(text: model.digestText)
             }
+            // Brifing veya triyaj listelerinden en az biri doluysa Markdown dışa aktarımına izin ver.
+            if canExport {
+                ExportBar(markdown: { model.digestMarkdown() }, filename: "Bugün brifingi")
+            }
         }
         .padding(14).frame(maxWidth: .infinity, alignment: .leading).cardSurface()
+    }
+
+    /// Dışa aktarılacak bir içerik var mı (brifing metni veya triyaj listeleri).
+    private var canExport: Bool {
+        !(model.digestText.isEmpty && model.needsReply.isEmpty && model.waitingOn.isEmpty)
     }
 }
 
@@ -1130,8 +1139,7 @@ private struct AgeChip: View {
     let date: Date?
 
     var body: some View {
-        let days = AppModel.ageDays(date)
-        Text(days <= 0 ? "bugün" : "\(days)g")
+        Text(AppModel.ageLabel(date))
             .font(.mono(10, .medium)).foregroundStyle(Theme.accent)
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(Theme.accentSoft, in: Capsule())

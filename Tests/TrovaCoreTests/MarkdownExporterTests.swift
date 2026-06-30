@@ -82,4 +82,44 @@ final class MarkdownExporterTests: XCTestCase {
         let md = MarkdownExporter.conversation([], title: "Boş")
         XCTAssertTrue(md.contains("(boş sohbet)"))
     }
+
+    // MARK: - Bugün brifingi (digest)
+
+    func testDigestWithBothLists() {
+        let needs = [DigestItem(from: "Ali", subject: "Fatura", ageLabel: "2g")]
+        let waiting = [DigestItem(from: "Veli", subject: "Teklif", ageLabel: "5g")]
+        let md = MarkdownExporter.digest(title: "Bugün — 30 Haziran",
+                                         briefing: "Bugün iki konu öne çıkıyor.",
+                                         needsReply: needs, waitingOn: waiting)
+        XCTAssertTrue(md.hasPrefix("# Bugün — 30 Haziran\n"))
+        XCTAssertTrue(md.contains("Bugün iki konu öne çıkıyor."))
+        XCTAssertTrue(md.contains("## Yanıt gerekiyor"))
+        XCTAssertTrue(md.contains("- **Ali** — Fatura _(2g)_"))
+        XCTAssertTrue(md.contains("## Yanıt bekliyor"))
+        XCTAssertTrue(md.contains("- **Veli** — Teklif _(5g)_"))
+        XCTAssertTrue(md.contains("_Trova ile dışa aktarıldı_"))
+    }
+
+    func testDigestWithoutAgeLabelOmitsParens() {
+        let needs = [DigestItem(from: "Ali", subject: "Fatura", ageLabel: "")]
+        let md = MarkdownExporter.digest(title: "Bugün", briefing: "",
+                                         needsReply: needs, waitingOn: [])
+        XCTAssertTrue(md.contains("- **Ali** — Fatura\n"))
+        XCTAssertFalse(md.contains("Fatura _("))
+    }
+
+    func testDigestEmptyListsStayConsistent() {
+        let md = MarkdownExporter.digest(title: "Bugün", briefing: "Brifing metni.",
+                                         needsReply: [], waitingOn: [])
+        XCTAssertTrue(md.contains("## Yanıt gerekiyor"))
+        XCTAssertTrue(md.contains("## Yanıt bekliyor"))
+        XCTAssertTrue(md.contains("_(yok)_"))
+    }
+
+    func testDigestEmptyBriefingStillHasTitle() {
+        let md = MarkdownExporter.digest(title: "Bugün — Test", briefing: "   ",
+                                         needsReply: [], waitingOn: [])
+        XCTAssertTrue(md.hasPrefix("# Bugün — Test\n"))
+        XCTAssertFalse(md.contains("\n\n\n"))   // boş brifing fazladan boşluk bırakmaz
+    }
 }
