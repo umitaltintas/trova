@@ -165,6 +165,12 @@ final class AppModel {
     // Sonuç satırı onay kutusu + toplu aksiyon çubuğu bunu izler; yeni aramada sıfırlanır.
     var selectedResultIDs: Set<String> = []
 
+    // Konuşmalara göre gruplama (thread grouping): açıkken arama sonuçları aynı konuya ait
+    // mailleri tek konuşma altında toplar. Yalnız GÖSTERİMİ etkiler — yeniden sorgu YAPMAZ.
+    var groupByThread = false
+    // Açılmış (genişletilmiş) konuşma grubu anahtarları; başlığa tıklayınca dolup boşalır.
+    var expandedThreadKeys: Set<String> = []
+
     // Kayıtlı aramalar
     var savedSearches: [SavedSearch] = []
     // Her kayıtlı aramanın şu anki canlı eşleşme sayısı (akıllı klasör rozeti). id → sayı.
@@ -228,6 +234,18 @@ final class AppModel {
     var displayedResults: [SearchHit] {
         guard let sender = activeSenderFilter else { return sortedResults }
         return Facets.filter(sortedResults, bySender: sender)
+    }
+
+    /// Gösterilen sonuçların konuşmalara (thread) göre gruplanmış hâli. `groupByThread` AÇIKKEN
+    /// kullanılır; aynı konunun farklı önekli ("Re:"/"Ynt:"/"Fwd:") kopyaları tek grupta toplanır.
+    var threadGroups: [ThreadGrouping.ThreadGroup] {
+        ThreadGrouping.group(displayedResults)
+    }
+
+    /// Bir konuşma grubunun açık/kapalı (genişletilmiş) durumunu değiştirir.
+    func toggleThreadExpanded(_ key: String) {
+        if expandedThreadKeys.contains(key) { expandedThreadKeys.remove(key) }
+        else { expandedThreadKeys.insert(key) }
     }
 
     /// Sonuçlardaki en sık gönderenler (sayılı çipler). Filtre UYGULANMADAN ham `results`'tan
@@ -1076,6 +1094,8 @@ final class AppModel {
         activeSenderFilter = nil
         // Yeni arama: önceki çoklu seçim yeni sonuçlarla tutarsız kalmasın diye temizle.
         selectedResultIDs.removeAll()
+        // Yeni arama: eski konuşma genişletme durumu yeni gruplara yapışmasın diye temizle.
+        expandedThreadKeys.removeAll()
         // Arama metni yoksa bile aktif bir filtre çipi (okunmadı/bayraklı/yıldızlı) varsa browse'a izin ver.
         guard !raw.isEmpty || unreadOnly || flaggedOnly || pinnedOnly || activeQuickDate != nil else {
             results = []; selection = nil; highlightTerms = []; return

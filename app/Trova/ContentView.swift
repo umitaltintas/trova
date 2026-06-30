@@ -391,6 +391,11 @@ private struct SearchColumn: View {
                                  isOn: model.pinnedOnly) {
                     model.pinnedOnly.toggle(); model.runSearch()
                 }
+                // Konuşmalara göre gruplama: yalnız GÖSTERİMİ değiştirir, yeniden sorgu YAPMAZ.
+                FilterToggleChip(text: "Konuşmalar", systemImage: "bubble.left.and.bubble.right",
+                                 isOn: model.groupByThread) {
+                    model.groupByThread.toggle()
+                }
                 // Hızlı tarih çipleri: tek tıkla (yazmadan) aralık; aktif olan vurgulu, tekrar tıklayınca kalkar.
                 ForEach(QuickDateRange.allCases, id: \.self) { kind in
                     FilterToggleChip(text: kind.label, systemImage: kind.systemImage,
@@ -482,10 +487,33 @@ private struct SearchColumn: View {
                     BulkActionBar()
                 }
                 List(selection: $model.selection) {
-                    ForEach(model.displayedResults) { hit in
-                        ResultRow(hit: hit, terms: model.highlightTerms)
-                            .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
-                            .listRowSeparator(.hidden)
+                    if model.groupByThread {
+                        // Konuşmalara göre gruplu görünüm: tek üyeli gruplar normal satır;
+                        // çok üyeli gruplar katlanabilir başlık + (açıkken) üye satırları.
+                        ForEach(model.threadGroups) { group in
+                            if group.count == 1 {
+                                ResultRow(hit: group.members[0], terms: model.highlightTerms)
+                                    .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
+                                    .listRowSeparator(.hidden)
+                            } else {
+                                ThreadHeaderRow(group: group)
+                                    .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
+                                    .listRowSeparator(.hidden)
+                                if model.expandedThreadKeys.contains(group.key) {
+                                    ForEach(group.members) { member in
+                                        ResultRow(hit: member, terms: model.highlightTerms)
+                                            .listRowInsets(EdgeInsets(top: 3, leading: 28, bottom: 3, trailing: 8))
+                                            .listRowSeparator(.hidden)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        ForEach(model.displayedResults) { hit in
+                            ResultRow(hit: hit, terms: model.highlightTerms)
+                                .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
+                                .listRowSeparator(.hidden)
+                        }
                     }
                 }
                 .listStyle(.plain).scrollContentBackground(.hidden)
@@ -765,6 +793,61 @@ private struct ResultRow: View {
                 }
             }
         }
+    }
+}
+
+/// Çok üyeli bir konuşma grubunun (thread) katlanabilir başlık satırı. Konu (representativeSubject),
+/// üye sayısı rozeti, en yeni tarih ve okunmamış varsa indigo nokta gösterir. Satıra tıklanınca
+/// grup açılır/kapanır (üye satırları ResultRow olarak altında belirir). Tıklama Button ile yutulur
+/// → List seçimini DEĞİŞTİRMEZ (yalnız genişletmeyi açar).
+private struct ThreadHeaderRow: View {
+    @Environment(AppModel.self) private var model
+    let group: ThreadGrouping.ThreadGroup
+
+    private var expanded: Bool { model.expandedThreadKeys.contains(group.key) }
+
+    var body: some View {
+        // En yeni üye başlık avatarı/yaşı için kullanılır (grup en az iki üye içerir).
+        let newest = group.members[0]
+        Button { model.toggleThreadExpanded(group.key) } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: 22, height: 32)   // ResultRow onay kutusuyla aynı genişlik (hizalama)
+                Avatar(name: newest.fromName, email: newest.fromAddress, size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        // Grupta okunmamış mail varsa belirgin indigo nokta.
+                        if group.unreadCount > 0 {
+                            Circle().fill(Theme.accent).frame(width: 7, height: 7)
+                                .help("\(group.unreadCount) okunmamış")
+                        }
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 10)).foregroundStyle(Theme.muted)
+                        Text(group.representativeSubject)
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+                            .lineLimit(1).truncationMode(.tail)
+                        CountBadge(text: "\(group.count)", active: false)
+                        Spacer()
+                        if let date = group.latestDate {
+                            Text(RelativeTime.short(date, now: Date()))
+                                .font(.mono(10)).foregroundStyle(Theme.faint)
+                                .help(RelativeTime.absolute(date))
+                                .accessibilityLabel("En yeni: \(RelativeTime.absolute(date))")
+                        }
+                    }
+                    Text("\(group.count) mesaj"
+                         + (group.unreadCount > 0 ? " · \(group.unreadCount) okunmamış" : ""))
+                        .font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
+            }
+            .padding(.vertical, 4).padding(.horizontal, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(group.representativeSubject), \(group.count) mesajlık konuşma")
+        .accessibilityHint(expanded ? "Konuşmayı kapat" : "Konuşmayı aç")
     }
 }
 
