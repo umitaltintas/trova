@@ -12,10 +12,13 @@ public struct DigestBuilder {
     /// brifing ister. Mail yoksa LLM'e gitmeden dostça bir mesaj döndürür.
     public func build(_ hits: [SearchHit]) throws -> String {
         guard !hits.isEmpty else { return "Yeni mail yok." }
-        return try llm.complete(messages: [
-            .init(role: "system", content: Self.systemPrompt),
-            .init(role: "user", content: Self.buildPrompt(hits)),
-        ])
+        return try llm.complete(messages: messages(for: hits))
+    }
+
+    /// Streaming için LLM mesajlarını üretir (sistem + brifing istemi).
+    public func messages(for hits: [SearchHit]) -> [ChatMessage] {
+        [.init(role: "system", content: Self.systemPrompt),
+         .init(role: "user", content: Self.buildPrompt(hits))]
     }
 
     static let systemPrompt = """

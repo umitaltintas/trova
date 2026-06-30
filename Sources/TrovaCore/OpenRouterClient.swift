@@ -109,6 +109,58 @@ public final class OpenRouterClient: @unchecked Sendable {
                             toolCalls: calls, rawAssistantMessage: message)
     }
 
+    // MARK: - Streaming (tek-atışlık; brifing/özet için canlı çıktı)
+
+    /// Bir SSE satırının ayrıştırılmış sonucu.
+    enum StreamEvent: Equatable { case content(String), done, ignore }
+
+    /// `data: {json}` / `data: [DONE]` satırından içerik parçasını çıkarır. Saf — test edilebilir.
+    static func streamEvent(fromLine line: String) -> StreamEvent {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("data:") else { return .ignore }
+        let payload = trimmed.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+        if payload == "[DONE]" { return .done }
+        guard let data = payload.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = root["choices"] as? [[String: Any]],
+              let delta = choices.first?["delta"] as? [String: Any],
+              let content = delta["content"] as? String, !content.isEmpty else { return .ignore }
+        return .content(content)
+    }
+
+    /// Yanıtı SSE ile akıtır; her içerik parçası için sırayla `onDelta` beklenir, tüm metin döner.
+    /// `onDelta` async olduğundan döngü her parçayı bekler → sıra korunur (UI'da ana aktöre güvenli hop).
+    /// Araç çağırma YOK — yalnızca tek-atışlık üretim (brifing, konu özeti) içindir.
+    public func completeStreaming(messages: [ChatMessage], temperature: Double = 0.2,
+                                  onDelta: @Sendable @escaping (String) async -> Void) async throws -> String {
+        var request = URLRequest(url: config.baseURL.appendingPathComponent("chat/completions"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
+        let payload: [String: Any] = [
+            "model": config.model, "temperature": temperature, "stream": true,
+            "messages": messages.map { ["role": $0.role, "content": $0.content] },
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (bytes, response) = try await session.bytes(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            var body = ""
+            for try await line in bytes.lines { body += line }
+            throw LLMError.badResponse("HTTP \(http.statusCode): \(body)")
+        }
+
+        var full = ""
+        for try await line in bytes.lines {
+            switch Self.streamEvent(fromLine: line) {
+            case .content(let fragment): full += fragment; await onDelta(fragment)
+            case .done: return full
+            case .ignore: continue
+            }
+        }
+        return full
+    }
+
     public static func fromEnvironment(
         _ env: [String: String] = ProcessInfo.processInfo.environment
     ) -> OpenRouterClient? {

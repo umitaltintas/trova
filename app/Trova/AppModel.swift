@@ -358,15 +358,24 @@ final class AppModel {
     func runDigest() {
         guard !isDigesting else { return }
         guard let llm = Providers.llm() else { errorMessage = AppError.noLLM.description; return }
-        isDigesting = true; errorMessage = nil
+        isDigesting = true; errorMessage = nil; digestText = ""
         Task {
             defer { isDigesting = false }
-            let text = await background { () -> String in
+            // Mailleri arka planda getir ve LLM mesajlarını hazırla.
+            let result = await background { () -> [ChatMessage]? in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 let hits = try store.recentReceived(sinceDays: 2, limit: 40)
-                return try DigestBuilder(llm: llm).build(hits)
+                return hits.isEmpty ? nil : DigestBuilder(llm: llm).messages(for: hits)
             }
-            if let text { digestText = text }
+            guard let inner = result else { return }                 // arka plan hatası (errorMessage set)
+            guard let messages = inner else { digestText = "Yeni mail yok."; return }
+            do {
+                _ = try await llm.completeStreaming(messages: messages) { fragment in
+                    await MainActor.run { self.digestText += fragment }
+                }
+            } catch {
+                errorMessage = "\(error)"
+            }
         }
     }
 
@@ -509,17 +518,26 @@ final class AppModel {
         let thread = selectedThread
         let key = selectedHit?.threadKey
         isSummarizing = true; errorMessage = nil
+        threadSummary = ""; summaryThreadKey = key
         Task {
             defer { isSummarizing = false }
-            let summary = await background { () -> String in
+            // Thread gövdelerini arka planda yükle ve LLM mesajlarını hazırla.
+            let messages = await background { () -> [ChatMessage] in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 let entries = try thread.map { hit in
                     ThreadEntry(from: hit.fromName ?? hit.fromAddress, date: hit.date,
                                 body: (try store.body(forID: hit.id)) ?? hit.snippet)
                 }
-                return try ThreadSummarizer(llm: llm).summarize(entries)
+                return ThreadSummarizer(llm: llm).messages(for: entries)
             }
-            if let summary { threadSummary = summary; summaryThreadKey = key }
+            guard let messages else { threadSummary = nil; return }
+            do {
+                _ = try await llm.completeStreaming(messages: messages) { fragment in
+                    await MainActor.run { self.threadSummary = (self.threadSummary ?? "") + fragment }
+                }
+            } catch {
+                errorMessage = "\(error)"; threadSummary = nil
+            }
         }
     }
 

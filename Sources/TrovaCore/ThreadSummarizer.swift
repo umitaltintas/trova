@@ -19,10 +19,13 @@ public struct ThreadSummarizer {
 
     public func summarize(_ entries: [ThreadEntry]) throws -> String {
         guard !entries.isEmpty else { return "Özetlenecek mesaj yok." }
-        return try llm.complete(messages: [
-            .init(role: "system", content: Self.systemPrompt),
-            .init(role: "user", content: Self.buildPrompt(entries)),
-        ])
+        return try llm.complete(messages: messages(for: entries))
+    }
+
+    /// Streaming için LLM mesajlarını üretir (sistem + konu özeti istemi).
+    public func messages(for entries: [ThreadEntry]) -> [ChatMessage] {
+        [.init(role: "system", content: Self.systemPrompt),
+         .init(role: "user", content: Self.buildPrompt(entries))]
     }
 
     static let systemPrompt = """
