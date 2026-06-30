@@ -123,6 +123,10 @@ final class AppModel {
     var threadSummary: String?           // "Konuyu özetle" çıktısı (markdown)
     var summaryThreadKey: String?        // özetin ait olduğu thread (başka thread'e geçince gizlenir)
     var isSummarizing = false
+    var replyDraft: String?              // "Yanıt taslağı" çıktısı (canlı dolar; markdown)
+    var replyDraftHit: String?           // taslağın ait olduğu mail id (başka maile geçince gizlenir)
+    var isDraftingReply = false
+    var draftError: String?              // taslak üretiminde oluşan hata (kart içinde gösterilir)
     var selectedMessageID: String?       // seçili mailin RFC822 Message-ID'si ("Mail'de Aç" için)
     var isSearching = false
     var detectedDateLabel: String?       // sorgudan algılanan Türkçe tarih ifadesi etiketi (örn. "son 7 gün")
@@ -1001,6 +1005,65 @@ final class AppModel {
                 errorMessage = "\(error)"; threadSummary = nil
             }
         }
+    }
+
+    /// Seçili maile LLM ile kısa, nazik bir Türkçe yanıt taslağı üretir (canlı akış).
+    /// Ajan döngüsüne dokunmaz; tek-atışlık `completeStreaming` kullanır → sıfır regresyon.
+    func generateReplyDraft() {
+        guard !isDraftingReply, let hit = selectedHit else { return }
+        guard let address = hit.fromAddress, !address.isEmpty else {
+            draftError = "Bu mailin gönderen adresi yok; yanıt taslağı üretilemiyor."
+            return
+        }
+        guard let llm = Providers.llm() else { errorMessage = AppError.noLLM.description; return }
+        let id = hit.id
+        let fromName = hit.fromName ?? hit.fromAddress
+        let subject = hit.subject ?? ""
+        let snippet = hit.snippet
+        isDraftingReply = true; draftError = nil
+        replyDraft = ""; replyDraftHit = id
+        Task {
+            defer { isDraftingReply = false }
+            // Mailin gövdesini arka planda yükle (özetleyiciyle aynı kaynak) ve mesajları hazırla.
+            let messages = await background { () -> [ChatMessage] in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                let body = (try store.body(forID: id)) ?? snippet
+                return ReplyDraft.messages(from: fromName, subject: subject, body: body)
+            }
+            guard let messages else { replyDraft = nil; return }
+            do {
+                _ = try await llm.completeStreaming(messages: messages) { fragment in
+                    await MainActor.run { self.replyDraft = (self.replyDraft ?? "") + fragment }
+                }
+            } catch {
+                draftError = "\(error)"; replyDraft = nil
+            }
+        }
+    }
+
+    /// Üretilen taslağı her durumda panoya kopyalar; sonra Mail.app yanıt penceresini açar.
+    /// mailto gövde uzunluk sınırını aşmamak için: taslak KISAYSA gövdeye konur, UZUNSA gövde
+    /// boş bırakılır — taslak zaten panoda olduğundan kullanıcı doğrudan yapıştırabilir.
+    func composeReplyWithDraft() {
+        guard let hit = selectedHit, let address = hit.fromAddress, !address.isEmpty,
+              let draft = replyDraft, !draft.isEmpty else {
+            draftError = "Yanıt penceresi açılamadı."
+            return
+        }
+        // Taslağı her zaman panoya kopyala (uzun gövdede yapıştırmak için).
+        Exporter.copy(draft)
+        let subject = MailtoLink.replySubject(hit.subject ?? "")
+        let body: String? = draft.count <= 1500 ? draft : nil
+        guard let url = MailtoLink.url(to: [address], subject: subject, body: body) else {
+            draftError = "Yanıt penceresi açılamadı."
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Yanıt taslağı kartını kapatır (taslağı ve hata durumunu temizler).
+    func clearReplyDraft() {
+        replyDraft = nil; replyDraftHit = nil; draftError = nil
     }
 
     /// Seçili mailden verilen adlı eki çıkarıp geçici bir dosyaya yazar ve sistemde açar.

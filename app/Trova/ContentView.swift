@@ -1530,6 +1530,12 @@ private struct ReadingPane: View {
                         }
                         .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
                         .help("Bu maile embedding'e göre anlamsal olarak en benzer mailleri bul")
+                        Button { model.generateReplyDraft() } label: {
+                            Label("Yanıt taslağı", systemImage: "pencil.and.outline")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
+                        .disabled((hit.fromAddress ?? "").isEmpty || model.isDraftingReply)
+                        .help("Bu maile LLM ile kısa, nazik bir Türkçe yanıt taslağı üret")
                         if model.selectedHTML?.isEmpty == false {
                             Picker("", selection: $formatted) {
                                 Text("Biçimli").tag(true)
@@ -1539,6 +1545,12 @@ private struct ReadingPane: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Yanıt taslağı kartı: yalnız bu maile aittir; üretilirken/hata olunca da gösterilir.
+                    if model.replyDraftHit == hit.id,
+                       model.replyDraft != nil || model.isDraftingReply || model.draftError != nil {
+                        ReplyDraftCard()
+                    }
                 }
                 .padding(16)
 
@@ -1738,6 +1750,56 @@ private struct ThreadSummaryCard: View {
             }
             // Blok-düzeyi markdown (başlık/liste/kod) render edilir; satır-içi de korunur.
             MarkdownText(summary, baseSize: 12)
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.radius))
+    }
+}
+
+/// "Yanıt taslağı" çıktısını gösteren kart: canlı dolar, kopyalanabilir ve "Mail'de yanıtla"
+/// ile Mail.app oluşturma penceresi açar. ThreadSummaryCard'ı aynalar (gönderme/yazma yok).
+private struct ReplyDraftCard: View {
+    @Environment(AppModel.self) private var model
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label("Yanıt taslağı", systemImage: "pencil.and.outline")
+                    .font(.rounded(12, .semibold)).foregroundStyle(Theme.accent)
+                if model.isDraftingReply { ProgressView().controlSize(.small) }
+                Spacer()
+                Button { model.clearReplyDraft() } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain).foregroundStyle(Theme.muted).font(.system(size: 11))
+                .help("Taslağı kapat")
+            }
+
+            if let error = model.draftError {
+                Text(error).font(.system(size: 11)).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let draft = model.replyDraft, !draft.isEmpty {
+                // Blok-düzeyi markdown render edilir; metin seçilebilir/kopyalanabilir.
+                MarkdownText(draft, baseSize: 12).textSelection(.enabled)
+                FlowLayout(spacing: 8, lineSpacing: 8) {
+                    Button { Exporter.copy(draft); copied = true } label: {
+                        Label(copied ? "Kopyalandı" : "Kopyala",
+                              systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .help("Taslağı panoya kopyala")
+                    Button { model.composeReplyWithDraft() } label: {
+                        Label("Mail'de yanıtla", systemImage: "arrowshape.turn.up.left")
+                    }
+                    .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
+                    .help("Taslağı panoya kopyalayıp Mail.app yanıt penceresini açar (gönderme yok)")
+                }
+            } else if model.isDraftingReply {
+                Text("Taslak üretiliyor…").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.radius))
