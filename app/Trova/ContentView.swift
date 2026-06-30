@@ -651,8 +651,7 @@ private struct AskColumn: View {
     }
 
     var body: some View {
-        @Bindable var model = model
-        VStack(spacing: 0) {
+        Group {
             if model.conversation.isEmpty {
                 EmptyStateView(content: EmptyStates.ask(hasIndex: model.totalCount > 0),
                                action: { model.runIndex() })
@@ -672,49 +671,62 @@ private struct AskColumn: View {
                     .onChange(of: model.conversation.last?.answer) { scrollToBottom(proxy) }
                 }
             }
-
-            Divider().overlay(Theme.line)
-
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles").foregroundStyle(Theme.accent)
-                TextField(model.conversation.isEmpty
-                            ? "Sor: geçen ay kira ile ilgili mailleri özetle…"
-                            : "Takip sorusu sor…",
-                          text: $model.question)
-                    .textFieldStyle(.plain).font(.system(size: 14)).onSubmit { model.runAsk() }
-                Button { showHistory = true } label: { Image(systemName: "clock.arrow.circlepath") }
-                    .buttonStyle(.plain).foregroundStyle(Theme.muted).help("Geçmiş sohbetler")
-                    .popover(isPresented: $showHistory, arrowEdge: .bottom) {
-                        ConversationHistoryList(dismiss: { showHistory = false })
-                    }
-                if !model.conversation.isEmpty && !model.isAsking {
-                    if !exportedTurns.isEmpty {
-                        Menu {
-                            Button("Markdown kopyala") { Exporter.copy(conversationMarkdown) }
-                            Button("Dışa aktar (.md)") {
-                                Exporter.save(conversationMarkdown, suggestedName: conversationTitle)
-                            }
-                        } label: {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden)
-                        .fixedSize().foregroundStyle(Theme.muted).help("Sohbeti dışa aktar")
-                    }
-                    Button { model.newConversation() } label: { Image(systemName: "square.and.pencil") }
-                        .buttonStyle(.plain).foregroundStyle(Theme.muted).help("Yeni sohbet")
-                }
-                if model.isAsking {
-                    Button { model.cancelJob() } label: { Text("İptal").font(.rounded(13, .semibold)) }
-                        .buttonStyle(.bordered).tint(Theme.accent)
-                } else {
-                    Button { model.runAsk() } label: { Text("Sor").font(.rounded(13, .semibold)) }
-                        .buttonStyle(.borderedProminent).tint(Theme.accent)
-                }
-            }
-            .padding(10).cardSurface().padding(12)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.surface)
+        // Giriş çubuğunu safeAreaInset ile alta sabitleriz: boş durumda EmptyStateView tüm
+        // alanı yutsa bile composer için yer rezerve edilir ve her zaman görünür kalır.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider().overlay(Theme.line)
+                composer
+            }
+            .background(Theme.surface)   // şeffaf inset değil; içerik composer ardından sızmasın
+        }
         .onAppear { model.loadConversations() }
+    }
+
+    /// Mesaj giriş çubuğu (composer): metin alanı, geçmiş popover'ı, dışa aktarma menüsü,
+    /// "Yeni sohbet" ile "Sor"/"İptal" düğmeleri. Ekranın altında sabit durur.
+    @ViewBuilder private var composer: some View {
+        @Bindable var model = model
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles").foregroundStyle(Theme.accent)
+            TextField(model.conversation.isEmpty
+                        ? "Sor: geçen ay kira ile ilgili mailleri özetle…"
+                        : "Takip sorusu sor…",
+                      text: $model.question)
+                .textFieldStyle(.plain).font(.system(size: 14)).onSubmit { model.runAsk() }
+            Button { showHistory = true } label: { Image(systemName: "clock.arrow.circlepath") }
+                .buttonStyle(.plain).foregroundStyle(Theme.muted).help("Geçmiş sohbetler")
+                .popover(isPresented: $showHistory, arrowEdge: .bottom) {
+                    ConversationHistoryList(dismiss: { showHistory = false })
+                }
+            if !model.conversation.isEmpty && !model.isAsking {
+                if !exportedTurns.isEmpty {
+                    Menu {
+                        Button("Markdown kopyala") { Exporter.copy(conversationMarkdown) }
+                        Button("Dışa aktar (.md)") {
+                            Exporter.save(conversationMarkdown, suggestedName: conversationTitle)
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                    .fixedSize().foregroundStyle(Theme.muted).help("Sohbeti dışa aktar")
+                }
+                Button { model.newConversation() } label: { Image(systemName: "square.and.pencil") }
+                    .buttonStyle(.plain).foregroundStyle(Theme.muted).help("Yeni sohbet")
+            }
+            if model.isAsking {
+                Button { model.cancelJob() } label: { Text("İptal").font(.rounded(13, .semibold)) }
+                    .buttonStyle(.bordered).tint(Theme.accent)
+            } else {
+                Button { model.runAsk() } label: { Text("Sor").font(.rounded(13, .semibold)) }
+                    .buttonStyle(.borderedProminent).tint(Theme.accent)
+            }
+        }
+        .padding(10).cardSurface().padding(12)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
