@@ -9,6 +9,20 @@ struct InsightsColumn: View {
     private var noData: Bool { model.monthly.allSatisfy { $0.count == 0 } }
 
     var body: some View {
+        Group {
+            if model.totalCount == 0 {
+                // İndeks yoksa istatistik yerine indeksleme daveti (tek kaynak).
+                EmptyStateView(content: EmptyStates.insights(hasIndex: false),
+                               action: { model.runIndex() })
+            } else {
+                content
+            }
+        }
+        .background(Theme.surface)
+        .task { model.loadInsights() }
+    }
+
+    private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Genel Bakış").font(.rounded(20, .bold)).foregroundStyle(Theme.ink)
@@ -22,8 +36,9 @@ struct InsightsColumn: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Son 12 ay").font(.rounded(13, .semibold)).foregroundStyle(Theme.ink)
                     if noData {
-                        Text("Bu dönemde mail yok. Önce indeksleyin.")
+                        Text(EmptyStates.insights(hasIndex: true).message)
                             .font(.system(size: 12)).foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity, minHeight: 180)
                     } else {
                         Chart(model.monthly) { item in
@@ -64,8 +79,6 @@ struct InsightsColumn: View {
             }
             .padding(16)
         }
-        .background(Theme.surface)
-        .task { model.loadInsights() }
     }
 }
 

@@ -388,11 +388,15 @@ private struct SearchColumn: View {
             Divider().overlay(Theme.line)
 
             if model.isSearching {
-                VStack { Spacer(); ProgressView().tint(Theme.accent); Spacer() }
+                // Spinner yerine sonuç satırı iskeletleri (algılanan yükleme hissi).
+                SkeletonList()
             } else if model.results.isEmpty {
-                EmptyState(icon: "magnifyingglass", title: "Mailde ara",
-                           subtitle: "Anahtar kelime ya da anlamsal sorgu. İpuçları: \"son 7 gün fatura\", "
-                                   + "\"from:ali\", \"has:attachment\" gibi tarih ve operatörler de kullanabilirsin.")
+                EmptyStateView(content: EmptyStates.search(
+                    hasIndex: model.totalCount > 0,
+                    hasQuery: !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    hasFilters: model.unreadOnly || model.flaggedOnly
+                              || !model.filterAccount.isEmpty || model.dateRange != .all),
+                    action: { model.runIndex() })
             } else {
                 List(selection: $model.selection) {
                     ForEach(model.results) { hit in
@@ -587,9 +591,8 @@ private struct AskColumn: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             if model.conversation.isEmpty {
-                EmptyState(icon: "sparkles", title: "Bir soru sor",
-                           subtitle: "Ajan arar, ilgili maili okur, bulduğuna göre yeniden arar; sonra "
-                                   + "kaynaklı yanıtlar. Yanıtın üstüne takip soruları sorabilirsin.")
+                EmptyStateView(content: EmptyStates.ask(hasIndex: model.totalCount > 0),
+                               action: { model.runIndex() })
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -962,8 +965,8 @@ private struct PeopleColumn: View {
     @ViewBuilder
     private var peopleList: some View {
         if model.people.isEmpty {
-            EmptyState(icon: "person.2", title: "Henüz kişi yok",
-                       subtitle: "Mailleri indeksleyince en çok yazıştığın kişiler burada listelenir.")
+            EmptyStateView(content: EmptyStates.people(hasIndex: model.totalCount > 0),
+                           action: { model.runIndex() })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
@@ -1093,10 +1096,14 @@ private struct DigestColumn: View {
                                   icon: "hourglass",
                                   hits: model.waitingOn)
                 }
-                if isEmpty && !model.isDigesting {
-                    EmptyState(icon: "sun.max", title: "Bugün için temiz",
-                               subtitle: "Yanıt bekleyen bir konu yok. Üstteki düğmeyle günlük "
-                                       + "brifing oluşturabilirsin.")
+                if model.isDigesting && model.needsReply.isEmpty && model.waitingOn.isEmpty
+                    && model.digestText.isEmpty {
+                    // Brifing hazırlanırken spinner yerine iskelet satırlar.
+                    SkeletonList(rows: 3).frame(minHeight: 180)
+                } else if isEmpty && !model.isDigesting {
+                    EmptyStateView(content: EmptyStates.digest(
+                        hasNeedsReply: !model.needsReply.isEmpty,
+                        hasWaiting: !model.waitingOn.isEmpty))
                         .frame(minHeight: 240)
                 }
             }
@@ -1441,10 +1448,15 @@ private struct AttachmentsColumn: View {
             Color.clear.frame(height: 10)
             Divider().overlay(Theme.line)
 
-            if model.attachments.isEmpty {
-                EmptyState(icon: "paperclip", title: "Ek bulunamadı",
-                           subtitle: "Eklerini dosya adına veya türe göre ara. Mailleri indeksleyince "
-                                   + "tüm ekler burada toplanır; bir eke tıklayınca uygun uygulamada açılır.")
+            if model.isLoadingAttachments && model.attachments.isEmpty {
+                // İlk yükleme/filtre değişiminde spinner yerine iskelet satırlar.
+                SkeletonList()
+            } else if model.attachments.isEmpty {
+                EmptyStateView(content: EmptyStates.attachments(
+                    hasAny: model.attachmentKindCounts.values.reduce(0, +) > 0,
+                    hasQueryOrFilter: !model.attachmentQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    || model.attachmentKind != nil),
+                    action: { model.runIndex() })
             } else {
                 ScrollView {
                     LazyVStack(spacing: 6) {

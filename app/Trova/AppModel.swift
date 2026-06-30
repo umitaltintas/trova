@@ -78,6 +78,7 @@ final class AppModel {
     var attachmentQuery = ""                       // ad araması (LIKE)
     var attachmentKind: AttachmentKind?            // seçili kategori filtresi (nil → tümü)
     var attachmentKindCounts: [AttachmentKind: Int] = [:]   // kategori çiplerindeki sayılar
+    var isLoadingAttachments = false               // ek listesi yüklenirken iskelet göstermek için
 
     // Sağlık / kurulum (HealthCheck girdileri)
     var llmConfigured = false
@@ -391,7 +392,9 @@ final class AppModel {
     func loadAttachments() {
         let q = attachmentQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let kind = attachmentKind
+        isLoadingAttachments = true
         Task {
+            defer { isLoadingAttachments = false }
             guard let data = await background({ () -> (rows: [AttachmentRow], counts: [AttachmentKind: Int]) in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 return (try store.allAttachments(query: q.isEmpty ? nil : q, kind: kind, limit: 500),
