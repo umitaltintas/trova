@@ -285,7 +285,18 @@ private struct SearchColumn: View {
                 }
                 .labelsHidden().frame(width: 116).controlSize(.small)
             }
-            .padding(10).cardSurface().padding(12)
+            .padding(10).cardSurface().padding(.horizontal, 12).padding(.top, 12)
+
+            if let label = model.detectedDateLabel {
+                HStack(spacing: 6) {
+                    Chip(text: label, systemImage: "calendar")
+                    Text("tarih filtresi uygulandı").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                    Spacer()
+                }
+                .padding(.horizontal, 14).padding(.top, 8)
+            }
+
+            Color.clear.frame(height: 12)
 
             Divider().overlay(Theme.line)
 

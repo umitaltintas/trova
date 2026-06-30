@@ -439,6 +439,24 @@ public final class IndexStore: Sendable {
         return Array(rows.filter { isActionableMailbox($0.mailbox) }.prefix(limit))
     }
 
+    /// Bir tarih aralığındaki maileri (en yeni önce) döndürür — yalnızca tarih ifadesi yazıldığında
+    /// ("son 7 gün") arama terimi olmadan listeleme için.
+    public func recentInRange(since: Date?, until: Date?, limit: Int) throws -> [SearchHit] {
+        var parts: [String] = []
+        var args: [any DatabaseValueConvertible] = []
+        if let since { parts.append("date >= ?"); args.append(since) }
+        if let until { parts.append("date <= ?"); args.append(until) }
+        let whereClause = parts.isEmpty ? "" : "WHERE " + parts.joined(separator: " AND ")
+        args.append(limit)
+        return try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, subject, fromName, fromAddress, mailbox, date, threadKey, attachments,
+                       snippet AS snip, 0.0 AS score
+                FROM message \(whereClause) ORDER BY date DESC LIMIT ?
+                """, arguments: StatementArguments(args)).map(Self.hit(from:))
+        }
+    }
+
     // MARK: - Ajan kalıcı hafızası (Faz 6)
 
     /// Ajanın oturumlar arası hatırlayacağı kalıcı bir bilgiyi kaydeder.

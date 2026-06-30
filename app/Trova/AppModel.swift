@@ -103,6 +103,7 @@ final class AppModel {
     var selectedThread: [SearchHit] = []
     var selectedMessageID: String?       // seçili mailin RFC822 Message-ID'si ("Mail'de Aç" için)
     var isSearching = false
+    var detectedDateLabel: String?       // sorgudan algılanan Türkçe tarih ifadesi etiketi (örn. "son 7 gün")
 
     // Filtre
     var filterAccount = ""          // "" → tüm hesaplar (accountID)
@@ -353,15 +354,26 @@ final class AppModel {
     }
 
     func runSearch() {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return }
+        let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return }
+        // Sorgudaki Türkçe tarih ifadesini ("son 7 gün", "dün", "geçen ay") ayrıştır.
+        let parsed = TurkishDateParser.parse(raw, now: Date())
+        detectedDateLabel = parsed.hint?.label
+        let q = parsed.hint != nil ? parsed.cleaned : raw
         let selectedMode = mode
+        // Algılanan tarih aralığı, kenar çubuğundaki tarih picker'ını geçersiz kılar.
+        let since = parsed.hint?.since ?? dateRange.since
+        let until = parsed.hint?.until
         let filter = SearchFilter(
-            accountID: filterAccount.isEmpty ? nil : filterAccount, since: dateRange.since)
+            accountID: filterAccount.isEmpty ? nil : filterAccount, since: since, until: until)
         isSearching = true; errorMessage = nil
         Task {
             let hits = await background { () -> [SearchHit] in
                 let store = try IndexStore(path: AppPaths.databaseURL)
+                // Yalnızca tarih yazıldıysa (arama terimi kalmadıysa) aralıktaki mailleri listele.
+                if q.isEmpty {
+                    return try store.recentInRange(since: since, until: until, limit: 50)
+                }
                 let embedder = selectedMode == .fts ? nil : Providers.embedder()
                 // Reranking yalnızca anlamsal/hibrit modlarda anlamlıdır.
                 let reranker = selectedMode == .fts ? nil : Providers.reranker()
