@@ -12,6 +12,10 @@ public struct IndexResult: Sendable {
     /// Bu çalışmada Message-ID'si zaten BAŞKA bir satırda var olduğu için ATLANAN kopya `.emlx`
     /// sayısı (Apple Mail aynı maili birden çok yere yazar). inserted'a dahil DEĞİLDİR.
     public var duplicates = 0
+    /// Bu çalışmada kaynak `.emlx` dosyası artık var olmadığı için (kullanıcı Mail'den silmiş)
+    /// DB'den TEMİZLENEN satır sayısı. Yalnız TAM, iptal edilmemiş taramada doldurulur (prune);
+    /// kısmi/iptal/limit'li taramada her zaman 0 (eksik `seen` ile yanlışlıkla silme yapılmaz).
+    public var removed = 0
 }
 
 /// Uzun işlemleri iş parçacıkları arası güvenli biçimde iptal etmek için bayrak.
@@ -37,6 +41,7 @@ public enum Indexer {
         limit: Int? = nil,
         batchSize: Int = 500,
         indexAttachmentContent: Bool = false,
+        pruneMissing: Bool = true,
         cancel: CancellationFlag? = nil,
         progress: ((_ processed: Int, _ total: Int) -> Void)? = nil
     ) throws -> IndexResult {
@@ -46,6 +51,10 @@ public enum Indexer {
         let now = Date()
 
         var result = IndexResult()
+        // Bu taramada GÖRÜLEN tüm `.emlx` id'leri (dosyası diskte var demek). Tarama tam ve iptal
+        // edilmeden biterse, bu kümede OLMAYAN satırlar = kaynağı silinmiş mailler → prune edilir.
+        var seen = Set<String>()
+        seen.reserveCapacity(total)
         var batch: [MessageRecord] = []
         batch.reserveCapacity(batchSize)
         // Aynı partideki mesajların ek adları (byte çıkarmadan, yalnız parse sonucu adlar).
@@ -79,6 +88,7 @@ public enum Indexer {
             result.processed += 1
 
             let id = stableID(for: message.fileURL)
+            seen.insert(id)   // dosya enumerasyonda göründü → atlansa/başarısız olsa bile satırı KORU
             let mtime = try? message.fileURL.resourceValues(forKeys: [.contentModificationDateKey])
                 .contentModificationDate
 
@@ -141,6 +151,18 @@ public enum Indexer {
         }
         try flush()
         progress?(result.processed, total)
+
+        // Prune (silinen mailleri DB'den düş): YALNIZ tam, iptal edilmemiş, limit'siz bir taramada.
+        // Aşağıdaki koşullardan herhangi biri varsa `seen` EKSİK olabilir → asla silme (yanlışlıkla
+        // tüm DB'yi süpürme felaketini önler):
+        //  • pruneMissing kapalı (örn. FSEvents/autoSync kısmi-davranış kaygısı),
+        //  • iptal edildi (kullanıcı durdurdu — kalan dosyalar görülmedi),
+        //  • limit verildi (yalnız ilk N dosya gezildi),
+        //  • hiç dosya görülmedi (boş/erişim sorunu — boş `seen` ile her şeyi silmeyiz).
+        let completed = cancel?.isCancelled != true
+        if pruneMissing, limit == nil, completed, !seen.isEmpty {
+            result.removed = try store.pruneMissing(keepIDs: seen)
+        }
         return result
     }
 

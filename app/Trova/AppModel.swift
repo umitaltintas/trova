@@ -332,8 +332,13 @@ final class AppModel {
             let result = await background { () -> IndexResult in
                 guard let root = MailStore.locate() else { throw AppError.noMailStore }
                 let store = try IndexStore(path: AppPaths.databaseURL)
+                // PRUNE KAPALI: FSEvents tetikli otomatik senkron, Apple Mail mail taşırken/yazarken
+                // de patlayabilir; o anlık durumda bir `.emlx` geçici olarak kaybolmuş görünebilir.
+                // Silinen mailleri düşürmeyi (prune) güvenli, kullanıcı tetikli TAM "İndeksle"ye
+                // bırakırız — burada yanlışlıkla satır silmeyiz (yalnız ekler/güncelleriz).
                 return try Indexer.run(store: store, root: root,
-                                       indexAttachmentContent: indexAttContent, cancel: flag) { processed, total in
+                                       indexAttachmentContent: indexAttContent,
+                                       pruneMissing: false, cancel: flag) { processed, total in
                     Task { @MainActor in
                         self.jobProcessed = processed; self.jobTotal = total
                         self.progress = "İndeksleniyor \(processed)/\(total)"
@@ -662,7 +667,7 @@ final class AppModel {
             }
             if let result {
                 progress = result.processed > 0
-                    ? "\(result.inserted) yeni · \(result.duplicates) kopya · \(result.skipped) atlandı · \(result.failed) hata"
+                    ? "\(result.inserted) yeni · \(result.duplicates) kopya · \(result.removed) silinmiş kaldırıldı · \(result.skipped) atlandı · \(result.failed) hata"
                     : "Mail bulunamadı"
             }
         }

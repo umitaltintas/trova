@@ -506,6 +506,48 @@ public final class IndexStore: Sendable {
         return best["id"]
     }
 
+    // MARK: - Silinen mailleri temizle (prune)
+
+    /// Tam, iptal edilmemiş bir taramada GÖRÜLEN tüm `.emlx` id'leri (`keepIDs`) DIŞINDA kalan
+    /// `message` satırlarını — yani kaynak dosyası artık diskte olmayan (kullanıcı Mail'den silmiş)
+    /// mailleri — ve yetim `message_vector`/`attachment`/`attachment_content` kayıtlarını tek
+    /// transaction'da siler. `.emlx` kaynak olduğundan satır silmek geri-üretilebilir.
+    ///
+    /// `keepIDs` on binlerce id içerebileceğinden SQLite'ın bağlı-değişken (`?`) limitine takılmamak
+    /// için tek dev bir `IN (...)` yerine geçici tabloya yazılır ve `NOT IN (SELECT ...)` ile küme
+    /// bazlı (satır döngüsüz) silinir. Dönüş: silinen `message` satırı sayısı.
+    ///
+    /// UYARI: `keepIDs` BOŞSA tüm satırlar silinir (uç durum) — çağıran (Indexer) yalnız tam ve
+    /// iptal edilmemiş, en az bir dosya görülmüş taramada çağırarak bunu güvenceye alır.
+    @discardableResult
+    public func pruneMissing(keepIDs: Set<String>) throws -> Int {
+        try dbQueue.write { db in
+            try db.execute(sql: "DROP TABLE IF EXISTS temp_keep_ids")
+            try db.execute(sql: "CREATE TEMP TABLE temp_keep_ids (id TEXT PRIMARY KEY)")
+            for id in keepIDs {
+                try db.execute(sql: "INSERT OR IGNORE INTO temp_keep_ids (id) VALUES (?)",
+                               arguments: [id])
+            }
+            let removed = try Int.fetchOne(db, sql:
+                "SELECT COUNT(*) FROM message WHERE id NOT IN (SELECT id FROM temp_keep_ids)") ?? 0
+            if removed > 0 {
+                // FTS (message_fts) tetikleyiciyle senkron; message_vector/attachment FK CASCADE ile
+                // gider — ama attachment_content (FK'siz FTS5) ELLE silinmeli. Tümünü açıkça silerek
+                // FK pragma durumundan bağımsız yetimsizliği garanti ederiz (dedupeExisting deseni).
+                try db.execute(sql:
+                    "DELETE FROM attachment_content WHERE messageID NOT IN (SELECT id FROM temp_keep_ids)")
+                try db.execute(sql:
+                    "DELETE FROM attachment WHERE messageID NOT IN (SELECT id FROM temp_keep_ids)")
+                try db.execute(sql:
+                    "DELETE FROM message_vector WHERE id NOT IN (SELECT id FROM temp_keep_ids)")
+                try db.execute(sql:
+                    "DELETE FROM message WHERE id NOT IN (SELECT id FROM temp_keep_ids)")
+            }
+            try db.execute(sql: "DROP TABLE IF EXISTS temp_keep_ids")
+            return removed
+        }
+    }
+
     /// Artımlı indeksleme durumu: id → (dosya mtime, parser sürümü).
     public func indexedStates() throws -> [String: IndexedState] {
         try dbQueue.read { db in
