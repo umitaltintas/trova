@@ -45,6 +45,9 @@ enum PaletteCommands {
         .init(id: "refresh", title: "Yenile", subtitle: "Durumu güncelle", icon: "arrow.clockwise") {
             $0.refreshStatus()
         },
+        .init(id: "shortcuts", title: "Klavye kısayolları", subtitle: "Tüm kısayolları göster (⌘/)", icon: "keyboard") {
+            $0.showShortcuts = true
+        },
     ]
 }
 

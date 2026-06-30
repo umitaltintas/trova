@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var showPalette = false
 
     var body: some View {
+        @Bindable var model = model
         NavigationSplitView {
             Sidebar(autoSync: $autoSync)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 224, max: 280)
@@ -34,10 +35,11 @@ struct ContentView: View {
         .overlay(alignment: .bottom) { ErrorBanner() }
         .background { KeyboardShortcuts(showPalette: $showPalette) }
         .sheet(isPresented: $showPalette) { CommandPaletteView().environment(model) }
+        .sheet(isPresented: $model.showShortcuts) { ShortcutsSheet() }
     }
 }
 
-/// Görünmez düğmelerle global klavye kısayolları: ⌘K palet, ⌘1–6 bölümler.
+/// Görünmez düğmelerle global klavye kısayolları: ⌘K palet, ⌘/ kılavuz, ⌘1–6 bölümler.
 private struct KeyboardShortcuts: View {
     @Environment(AppModel.self) private var model
     @Binding var showPalette: Bool
@@ -45,6 +47,7 @@ private struct KeyboardShortcuts: View {
     var body: some View {
         Group {
             Button("") { showPalette.toggle() }.keyboardShortcut("k", modifiers: .command)
+            Button("") { model.showShortcuts = true }.keyboardShortcut("/", modifiers: .command)
             Button("") { model.section = .ask }.keyboardShortcut("1", modifiers: .command)
             Button("") { model.section = .search }.keyboardShortcut("2", modifiers: .command)
             Button("") { model.section = .digest }.keyboardShortcut("3", modifiers: .command)

@@ -55,6 +55,9 @@ final class AppModel {
     enum Section: Equatable { case ask, search, digest, people, insights, attachments }
     var section: Section = .ask
 
+    // Klavye kısayolları kılavuzu (⌘/) açık mı — sheet bunu izler; palet komutu da bunu açar.
+    var showShortcuts = false
+
     // Durum
     var hasAccess = false
     var mailRoot: String?
