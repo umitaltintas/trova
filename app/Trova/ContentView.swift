@@ -931,17 +931,11 @@ private struct AnswerCard: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Yanıt", systemImage: "text.alignleft")
                 .font(.rounded(12, .semibold)).foregroundStyle(Theme.accent)
-            Text(markdown).font(.system(size: 13)).foregroundStyle(Theme.ink)
-                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            // Blok-düzeyi markdown (başlık/liste/kod) render edilir; satır-içi de korunur.
+            MarkdownText(text, baseSize: 13)
         }
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.radius))
-    }
-
-    private var markdown: AttributedString {
-        (try? AttributedString(markdown: text,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(text)
     }
 }
 
@@ -1625,17 +1619,11 @@ private struct ThreadSummaryCard: View {
                 .buttonStyle(.plain).foregroundStyle(Theme.accent).font(.system(size: 11))
                 .help("Özeti panoya kopyala")
             }
-            Text(markdown).font(.system(size: 12)).foregroundStyle(Theme.ink)
-                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            // Blok-düzeyi markdown (başlık/liste/kod) render edilir; satır-içi de korunur.
+            MarkdownText(summary, baseSize: 12)
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.radius))
-    }
-
-    private var markdown: AttributedString {
-        (try? AttributedString(markdown: summary,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(summary)
     }
 }
 
