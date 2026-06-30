@@ -311,6 +311,7 @@ private struct SearchColumn: View {
                     Text("Kelime").tag(SearchMode.fts)
                 }
                 .labelsHidden().frame(width: 116).controlSize(.small)
+                SavedSearchButton()
             }
             .padding(10).cardSurface().padding(.horizontal, 12).padding(.top, 12)
 
@@ -347,6 +348,68 @@ private struct SearchColumn: View {
             }
         }
         .background(Theme.surface)
+    }
+}
+
+/// Aramayı isimle kaydetme + kayıtlıları çalıştırma/silme popover'ı (yer imi düğmesi).
+private struct SavedSearchButton: View {
+    @Environment(AppModel.self) private var model
+    @State private var show = false
+    @State private var name = ""
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !model.query.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        Button { show.toggle() } label: {
+            Image(systemName: model.savedSearches.isEmpty ? "bookmark" : "bookmark.fill")
+                .foregroundStyle(Theme.accent)
+        }
+        .buttonStyle(.plain)
+        .help("Kayıtlı aramalar")
+        .popover(isPresented: $show, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Aramayı kaydet").font(.rounded(13, .semibold)).foregroundStyle(Theme.ink)
+                HStack(spacing: 6) {
+                    TextField("İsim", text: $name).textFieldStyle(.roundedBorder)
+                        .onSubmit { if canSave { model.saveCurrentSearch(name: name); name = "" } }
+                    Button("Kaydet") { model.saveCurrentSearch(name: name); name = "" }
+                        .disabled(!canSave)
+                }
+                if !model.savedSearches.isEmpty {
+                    Divider()
+                    Text("KAYITLI").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.faint).tracking(0.6)
+                    ScrollView {
+                        VStack(spacing: 4) {
+                            ForEach(model.savedSearches) { saved in
+                                HStack(spacing: 8) {
+                                    Button { model.runSavedSearch(saved); show = false } label: {
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(saved.name).font(.system(size: 12, weight: .medium))
+                                                .foregroundStyle(Theme.ink).lineLimit(1)
+                                            Text(saved.query).font(.system(size: 10))
+                                                .foregroundStyle(Theme.muted).lineLimit(1)
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .buttonStyle(.plain)
+                                    Button { model.deleteSavedSearch(saved.id) } label: {
+                                        Image(systemName: "trash").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                                    }
+                                    .buttonStyle(.plain).help("Sil")
+                                }
+                                .padding(.vertical, 3)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 200)
+                }
+            }
+            .padding(14).frame(width: 290)
+        }
     }
 }
 

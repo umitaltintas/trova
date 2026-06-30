@@ -115,6 +115,9 @@ final class AppModel {
     var filterAccount = ""          // "" → tüm hesaplar (accountID)
     var dateRange: DateRange = .all
 
+    // Kayıtlı aramalar
+    var savedSearches: [SavedSearch] = []
+
     // Ask (AI ajan — sohbet)
     var question = ""
     var conversation: [Exchange] = []
@@ -231,6 +234,46 @@ final class AppModel {
         loadConversations()
         loadMemories()
         loadPeople()
+        loadSavedSearches()
+    }
+
+    /// Kayıtlı aramaları arka planda tazeler.
+    func loadSavedSearches() {
+        Task {
+            guard let list = await background({
+                try IndexStore(path: AppPaths.databaseURL).allSavedSearches()
+            }) else { return }
+            savedSearches = list
+        }
+    }
+
+    /// Mevcut arama sorgusunu (ve modunu) verilen isimle kaydeder.
+    func saveCurrentSearch(name: String) {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let selectedMode = mode.rawValue
+        Task {
+            _ = await background {
+                try IndexStore(path: AppPaths.databaseURL).saveSearch(name: name, query: q, mode: selectedMode)
+            }
+            loadSavedSearches()
+        }
+    }
+
+    /// Kayıtlı bir aramayı yükleyip çalıştırır (Ara sekmesine geçer).
+    func runSavedSearch(_ saved: SavedSearch) {
+        query = saved.query
+        mode = SearchMode(rawValue: saved.mode) ?? .hybrid
+        section = .search
+        runSearch()
+    }
+
+    /// Kayıtlı bir aramayı siler.
+    func deleteSavedSearch(_ id: String) {
+        Task {
+            _ = await background { try IndexStore(path: AppPaths.databaseURL).deleteSavedSearch(id) }
+            loadSavedSearches()
+        }
     }
 
     /// En çok yazışılan kişileri arka planda tazeler ("Kişiler" görünümü için).

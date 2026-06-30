@@ -135,6 +135,17 @@ public struct ConversationSummary: Sendable, Identifiable {
     }
 }
 
+/// İsimle kaydedilmiş bir arama (sorgu + mod). Sorgu operatör/tarih ifadelerini de içerebilir.
+public struct SavedSearch: Sendable, Identifiable, Equatable {
+    public let id: String
+    public let name: String
+    public let query: String
+    public let mode: String
+    public init(id: String, name: String, query: String, mode: String) {
+        self.id = id; self.name = name; self.query = query; self.mode = mode
+    }
+}
+
 /// SQLite tabanlı indeks deposu. `message` tablosu + `message_fts` (FTS5) sanal tablosu.
 public final class IndexStore: Sendable {
     let dbQueue: DatabaseQueue
@@ -258,6 +269,17 @@ public final class IndexStore: Sendable {
                 """)
             try db.execute(sql:
                 "CREATE INDEX idx_turn_conversation ON conversation_turn(conversationId)")
+        }
+        migrator.registerMigration("v8_saved_searches") { db in
+            try db.execute(sql: """
+                CREATE TABLE saved_search (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    query TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    createdAt DATETIME NOT NULL
+                )
+                """)
         }
         return migrator
     }
@@ -607,6 +629,45 @@ public final class IndexStore: Sendable {
                 """, arguments: [id]).map {
                 ChatTurn(question: $0["question"], answer: $0["answer"])
             }
+        }
+    }
+
+    // MARK: - Kayıtlı aramalar (Faz 8)
+
+    /// Bir aramayı isimle kaydeder (sorgu metni operatör/tarih ifadelerini de taşıyabilir).
+    /// Aynı isim varsa sorgu/mod güncellenir.
+    public func saveSearch(name: String, query: String, mode: String) throws {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, !trimmedQuery.isEmpty else { return }
+        try dbQueue.write { db in
+            if let existing = try String.fetchOne(db, sql:
+                "SELECT id FROM saved_search WHERE name = ?", arguments: [trimmedName]) {
+                try db.execute(sql: "UPDATE saved_search SET query = ?, mode = ? WHERE id = ?",
+                               arguments: [trimmedQuery, mode, existing])
+            } else {
+                try db.execute(sql: """
+                    INSERT INTO saved_search (id, name, query, mode, createdAt) VALUES (?, ?, ?, ?, ?)
+                    """, arguments: [UUID().uuidString, trimmedName, trimmedQuery, mode, Date()])
+            }
+        }
+    }
+
+    /// Tüm kayıtlı aramaları en yeniden eskiye döndürür.
+    public func allSavedSearches() throws -> [SavedSearch] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, name, query, mode FROM saved_search ORDER BY createdAt DESC
+                """).map {
+                SavedSearch(id: $0["id"], name: $0["name"], query: $0["query"], mode: $0["mode"])
+            }
+        }
+    }
+
+    /// Bir kayıtlı aramayı siler.
+    public func deleteSavedSearch(_ id: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM saved_search WHERE id = ?", arguments: [id])
         }
     }
 
