@@ -95,6 +95,32 @@ public struct MonthCount: Sendable, Equatable, Identifiable {
     public init(month: String, count: Int) { self.month = month; self.count = count }
 }
 
+/// Bir ayın gelen/gönderilen mail sayıları ("Genel Bakış" gelen vs gönderilen grafiği için).
+/// Ay anahtarlama MonthCount ile aynıdır (yıl + ay); `received` + `sent`, o ayın toplam mail
+/// sayısına (monthlyCounts) eşittir — kutu filtresi yoktur.
+public struct MonthSentReceived: Sendable, Equatable, Identifiable {
+    public let year: Int
+    public let month: Int          // 1...12
+    public let received: Int       // gelen (gönderilmiş olmayan tüm kutular)
+    public let sent: Int           // gönderilen (isSentMailbox)
+    public var id: String { String(format: "%04d-%02d", year, month) }
+    public init(year: Int, month: Int, received: Int, sent: Int) {
+        self.year = year; self.month = month; self.received = received; self.sent = sent
+    }
+}
+
+/// Ay numarasını (1...12) kısa Türkçe ay adına çeviren saf, paylaşılan yardımcı ("Kas").
+/// Hem MonthCount hem MonthSentReceived grafik ekseni etiketleri bunu kullanır (kopyalama yok).
+/// Aralık dışındaysa nil döner; çağıran uygun bir geri-dönüş seçer.
+public enum TurkishMonth {
+    public static let shortNames = ["Oca", "Şub", "Mar", "Nis", "May", "Haz",
+                                    "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"]
+    public static func short(_ month: Int) -> String? {
+        guard (1...12).contains(month) else { return nil }
+        return shortNames[month - 1]
+    }
+}
+
 /// Bir kişinin mini analitiği ("Kişiler" detayında gösterilir).
 public struct SenderDetail: Sendable, Equatable {
     public let total: Int
@@ -793,6 +819,51 @@ public final class IndexStore: Sendable {
             if counts[label] != nil { counts[label]! += 1 }
         }
         return order.map { MonthCount(month: $0, count: counts[$0] ?? 0) }
+    }
+
+    /// Son `months` ayın aylık GELEN/GÖNDERİLEN dağılımı (en eskiden yeniye, eksik aylar (0,0)).
+    /// `monthlyCounts` ile AYNI pencere + bucket mantığı (aynı `fmt` anahtarlama, zaman dilimi
+    /// tutarlı, `now`/`calendar` enjekte → deterministik test). Tarihi olan TÜM mailler sayılır;
+    /// kutu filtresi YOKTUR → her ayda `received` + `sent`, `monthlyCounts(...).count` ile birebir
+    /// eşittir. Sınıflandırma: `isSentMailbox(mailbox)` ise `sent`, aksi halde `received` (çöp/spam/
+    /// arşiv/taslak da gelen sayılır — monthlyCounts hiçbirini dışlamadığından davranış tutarlı).
+    public func monthlySentReceived(months: Int, now: Date,
+                                    calendar: Calendar = .current) throws -> [MonthSentReceived] {
+        guard months > 0 else { return [] }
+        let thisMonthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
+        let cutoff = calendar.date(byAdding: .month, value: -(months - 1), to: thisMonthStart) ?? thisMonthStart
+
+        let rows: [(date: Date, mailbox: String)] = try dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT date, mailbox FROM message WHERE date >= ?",
+                             arguments: [cutoff]).map { (date: $0["date"], mailbox: $0["mailbox"] ?? "") }
+        }
+
+        let fmt = DateFormatter()
+        fmt.calendar = calendar
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = calendar.timeZone
+        fmt.dateFormat = "yyyy-MM"
+
+        // Pencere kovaları (etiket + yıl/ay); yıl/ay aynı takvim/zaman diliminden türetilir → etiketle uyumlu.
+        var buckets: [(label: String, year: Int, month: Int)] = []
+        var received: [String: Int] = [:]
+        var sent: [String: Int] = [:]
+        for i in stride(from: months - 1, through: 0, by: -1) {
+            let monthDate = calendar.date(byAdding: .month, value: -i, to: thisMonthStart) ?? thisMonthStart
+            let label = fmt.string(from: monthDate)
+            let comps = calendar.dateComponents([.year, .month], from: monthDate)
+            buckets.append((label, comps.year ?? 0, comps.month ?? 0))
+            received[label] = 0; sent[label] = 0
+        }
+        for row in rows {
+            let label = fmt.string(from: row.date)
+            guard received[label] != nil else { continue }
+            if isSentMailbox(row.mailbox) { sent[label]! += 1 } else { received[label]! += 1 }
+        }
+        return buckets.map {
+            MonthSentReceived(year: $0.year, month: $0.month,
+                              received: received[$0.label] ?? 0, sent: sent[$0.label] ?? 0)
+        }
     }
 
     /// Bir kişinin (gönderen adresi) mini analitiği: toplam, ekli sayısı, ilk/son tarih.

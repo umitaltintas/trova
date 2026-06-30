@@ -7,6 +7,9 @@ struct InsightsColumn: View {
     @Environment(AppModel.self) private var model
 
     private var noData: Bool { model.monthly.allSatisfy { $0.count == 0 } }
+    private var noBalanceData: Bool {
+        model.monthlyBalance.allSatisfy { $0.received == 0 && $0.sent == 0 }
+    }
 
     var body: some View {
         Group {
@@ -55,6 +58,35 @@ struct InsightsColumn: View {
                 }
                 .padding(14).cardSurface()
 
+                // Gelen vs Gönderilen: son 12 ay, ay başına gruplu (yan yana) çubuklar.
+                // Veri yoksa kartı tamamen gizle (boş gürültü olmasın).
+                if !noBalanceData {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Gelen vs Gönderilen").font(.rounded(13, .semibold)).foregroundStyle(Theme.ink)
+                        Chart(model.monthlyBalance) { item in
+                            BarMark(
+                                x: .value("Ay", item.shortLabel),
+                                y: .value("Mail", item.received)
+                            )
+                            .position(by: .value("Tür", "Gelen"))
+                            .foregroundStyle(by: .value("Tür", "Gelen"))
+                            .cornerRadius(3)
+                            BarMark(
+                                x: .value("Ay", item.shortLabel),
+                                y: .value("Mail", item.sent)
+                            )
+                            .position(by: .value("Tür", "Gönderilen"))
+                            .foregroundStyle(by: .value("Tür", "Gönderilen"))
+                            .cornerRadius(3)
+                        }
+                        .chartForegroundStyleScale(["Gelen": Theme.accent, "Gönderilen": Theme.amber])
+                        .chartLegend(position: .bottom, spacing: 8)
+                        .frame(height: 200)
+                        .chartYAxis { AxisMarks(position: .leading) }
+                    }
+                    .padding(14).cardSurface()
+                }
+
                 if !model.people.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("En çok yazışılanlar").font(.rounded(13, .semibold)).foregroundStyle(Theme.ink)
@@ -99,11 +131,16 @@ private struct StatCard: View {
 }
 
 /// MonthCount "yyyy-MM" → grafik ekseni için kısa Türkçe ay etiketi ("Kas").
+/// Ay→etiket dönüşümü paylaşılan TurkishMonth yardımcısından gelir (kopyalama yok).
 extension MonthCount {
     var shortLabel: String {
         let parts = month.split(separator: "-")
-        guard parts.count == 2, let m = Int(parts[1]), (1...12).contains(m) else { return month }
-        let names = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"]
-        return names[m - 1]
+        guard parts.count == 2, let m = Int(parts[1]), let label = TurkishMonth.short(m) else { return month }
+        return label
     }
+}
+
+/// MonthSentReceived → grafik ekseni için kısa Türkçe ay etiketi ("Kas"); aynı paylaşılan yardımcı.
+extension MonthSentReceived {
+    var shortLabel: String { TurkishMonth.short(month) ?? "\(month)" }
 }

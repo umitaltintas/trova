@@ -73,6 +73,7 @@ final class AppModel {
 
     // Genel Bakış (insights)
     var monthly: [MonthCount] = []
+    var monthlyBalance: [MonthSentReceived] = []   // aylık gelen vs gönderilen dağılımı
     var attachmentTotal = 0
 
     // Ekler görünümü (tüm eklerin ada/türe göre aranabilir listesi)
@@ -574,11 +575,15 @@ final class AppModel {
     /// "Genel Bakış" verilerini (aylık hacim + ekli sayısı) arka planda tazeler.
     func loadInsights() {
         Task {
-            guard let data = await background({ () -> (monthly: [MonthCount], attachments: Int) in
+            guard let data = await background({ () -> (monthly: [MonthCount], balance: [MonthSentReceived], attachments: Int) in
                 let store = try IndexStore(path: AppPaths.databaseURL)
-                return (try store.monthlyCounts(months: 12, now: Date()), try store.attachmentCount())
+                let now = Date()   // aylık hacim ve gelen/gönderilen aynı now/calendar ile bucket'lanır
+                return (try store.monthlyCounts(months: 12, now: now),
+                        try store.monthlySentReceived(months: 12, now: now),
+                        try store.attachmentCount())
             }) else { return }
             monthly = data.monthly
+            monthlyBalance = data.balance
             attachmentTotal = data.attachments
         }
     }
