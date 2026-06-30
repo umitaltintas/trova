@@ -1014,6 +1014,42 @@ extension IndexStore {
         return Array(scored.sorted { $0.score > $1.score }.prefix(limit))
     }
 
+    /// Tek bir mailin gömme vektörünü getirir (gömülmemişse nil). `loadAllVectors`'la
+    /// aynı hizalamadan-bağımsız deserileştirmeyi kullanır.
+    func vector(forID id: String) throws -> [Float]? {
+        try dbQueue.read { db in
+            guard let row = try Row.fetchOne(db, sql:
+                "SELECT dim, vector FROM message_vector WHERE id = ?", arguments: [id]) else { return nil }
+            let data: Data = row["vector"]
+            let dim: Int = row["dim"]
+            var vector = [Float](repeating: 0, count: dim)
+            _ = vector.withUnsafeMutableBytes { data.copyBytes(to: $0) }
+            return vector
+        }
+    }
+
+    /// "Benzer mailler" (more-like-this): hedef mailin vektörüne embedding'e göre en yakın
+    /// mailleri kosinüs benzerliğiyle döndürür. `vectorSearch`'in kaba-kuvvet mantığını yeniden
+    /// kullanır; hedef mailin kendisi elenir. Hedef gömülmemişse boş döner. `SearchHit.score`
+    /// benzerlik skorudur (normalize vektörlerde nokta çarpımı = kosinüs).
+    public func similar(toMessageID id: String, limit: Int) throws -> [SearchHit] {
+        guard limit > 0, let target = try vector(forID: id) else { return [] }
+        // Kendini elemek için bir fazla aday çek, sonra hedef maili çıkar.
+        let ranked = Array(try vectorSearch(query: target, limit: limit + 1)
+            .filter { $0.id != id }
+            .prefix(limit))
+        guard !ranked.isEmpty else { return [] }
+        let meta = try hits(forIDs: ranked.map(\.id))
+        return ranked.compactMap { r -> SearchHit? in
+            guard let m = meta[r.id] else { return nil }
+            return SearchHit(
+                id: m.id, subject: m.subject, fromName: m.fromName, fromAddress: m.fromAddress,
+                mailbox: m.mailbox, date: m.date, snippet: m.snippet, score: Double(r.score),
+                threadKey: m.threadKey, attachments: m.attachments,
+                isRead: m.isRead, isFlagged: m.isFlagged)
+        }
+    }
+
     /// Tek bir mailin tam gövdesini getirir (detay görünümü için).
     public func body(forID id: String) throws -> String? {
         try dbQueue.read { db in

@@ -140,4 +140,22 @@ public enum EmptyStates {
             message: "Ada ya da türe göre eklerini burada arayabilirsin.",
             actionLabel: nil)
     }
+
+    /// Benzer mailler: hiç vektör yoksa "Gömme" daveti; varsa bu maile yakın başka mail yok.
+    public static func similar(hasVectors: Bool) -> EmptyStateContent {
+        if !hasVectors {
+            return EmptyStateContent(
+                systemImage: "sparkles",
+                title: "Anlamsal benzerlik için gömme gerekli",
+                message: "Benzer mailleri bulabilmem için önce 'Gömme' çalıştırarak maillerinin "
+                       + "anlamsal vektörlerini üretmelisin. Gömme tümüyle yerel çalışabilir.",
+                actionLabel: nil)
+        }
+        return EmptyStateContent(
+            systemImage: "square.stack.3d.up",
+            title: "Benzer mail bulunamadı",
+            message: "Bu maile anlamsal olarak yakın başka mail yok. Bu mail henüz gömülü "
+                   + "olmayabilir; daha fazla mail gömersen benzerlik sonuçları iyileşir.",
+            actionLabel: nil)
+    }
 }

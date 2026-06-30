@@ -59,4 +59,53 @@ final class VectorSearchTests: XCTestCase {
         let fused = RRF.fuse([["a", "b"], ["c", "d"]])
         XCTAssertEqual(Set(fused.map(\.id)), ["a", "b", "c", "d"])
     }
+
+    // MARK: - Benzer mailler (more-like-this)
+
+    func testSimilarReturnsNearestInOrderExcludingSelf() throws {
+        let store = try makeStore()
+        try store.upsert([message("1"), message("2"), message("3"), message("4")])
+        try store.upsertVectors([
+            ("1", [1, 0, 0]),
+            ("2", [0, 1, 0]),       // dik → en uzak
+            ("3", [0.9, 0.1, 0]),   // "1"e en yakın
+            ("4", [0.8, 0.2, 0]),   // "1"e ikinci yakın
+        ])
+
+        let hits = try store.similar(toMessageID: "1", limit: 5)
+        XCTAssertEqual(hits.map(\.id), ["3", "4", "2"])              // doğru sırada
+        XCTAssertFalse(hits.contains { $0.id == "1" })              // kendini elemez
+        XCTAssertGreaterThan(hits[0].score, hits[1].score)          // skor = benzerlik, azalan
+        XCTAssertEqual(hits[0].subject, "konu 3")                   // meta hidrasyonu
+    }
+
+    func testSimilarRespectsLimitAndExcludesSelf() throws {
+        let store = try makeStore()
+        try store.upsert([message("1"), message("2"), message("3"), message("4")])
+        try store.upsertVectors([
+            ("1", [1, 0, 0]),
+            ("2", [0.9, 0.1, 0]),
+            ("3", [0.8, 0.2, 0]),
+            ("4", [0.7, 0.3, 0]),
+        ])
+
+        let hits = try store.similar(toMessageID: "1", limit: 2)
+        XCTAssertEqual(hits.count, 2)                               // limit'e uyar
+        XCTAssertFalse(hits.contains { $0.id == "1" })             // kendini katmaz
+        XCTAssertEqual(hits.map(\.id), ["2", "3"])
+    }
+
+    func testSimilarEmptyWhenTargetHasNoVector() throws {
+        let store = try makeStore()
+        try store.upsert([message("1"), message("2")])
+        try store.upsertVectors([("2", [1, 0, 0])])                 // "1" gömülü değil
+        XCTAssertTrue(try store.similar(toMessageID: "1", limit: 5).isEmpty)
+    }
+
+    func testSimilarEmptyForUnknownMessage() throws {
+        let store = try makeStore()
+        try store.upsert([message("1")])
+        try store.upsertVectors([("1", [1, 0, 0])])
+        XCTAssertTrue(try store.similar(toMessageID: "yok", limit: 5).isEmpty)
+    }
 }

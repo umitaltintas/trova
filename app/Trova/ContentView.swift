@@ -1298,6 +1298,14 @@ private struct ReadingPane: View {
     @State private var formatted = true
 
     var body: some View {
+        @Bindable var model = model
+        content
+            .sheet(isPresented: $model.showSimilarSheet) {
+                SimilarMailsSheet().environment(model)
+            }
+    }
+
+    @ViewBuilder private var content: some View {
         if let hit = model.selectedHit {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 10) {
@@ -1350,6 +1358,11 @@ private struct ReadingPane: View {
                         .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
                         .disabled(MailLink.appleMailURL(messageID: model.selectedMessageID) == nil)
                         .help("Bu maili Apple Mail.app'te aç (yanıtlamak/işlem yapmak için)")
+                        Button { model.loadSimilar(messageID: hit.id) } label: {
+                            Label("Benzer mailler", systemImage: "square.stack.3d.up")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small).tint(Theme.accent)
+                        .help("Bu maile embedding'e göre anlamsal olarak en benzer mailleri bul")
                         if model.selectedHTML?.isEmpty == false {
                             Picker("", selection: $formatted) {
                                 Text("Biçimli").tag(true)
@@ -1389,6 +1402,88 @@ private struct ReadingPane: View {
                        subtitle: "Soldaki listeden bir mail seçince içeriği burada okunur.")
                 .background(Theme.surface)
         }
+    }
+}
+
+/// "Benzer mailler" sheet'i: seçili maile embedding'e göre en yakın mailleri benzerlik
+/// çipiyle listeler; bir satıra dokununca o maile geçer. Yükleme sırasında iskelet,
+/// sonuç yoksa (ya da mail gömülü değilse) yönlendirici boş durum gösterir.
+private struct SimilarMailsSheet: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "square.stack.3d.up").font(.system(size: 16)).foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Benzer mailler").font(.rounded(15, .bold)).foregroundStyle(Theme.ink)
+                    if let subject = model.similarSourceSubject, !subject.isEmpty {
+                        Text(subject).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                }
+                Spacer()
+                Button { model.showSimilarSheet = false } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundStyle(Theme.muted)
+                }
+                .buttonStyle(.plain).help("Kapat")
+            }
+            .padding(16)
+
+            Divider().overlay(Theme.line)
+
+            Group {
+                if model.isLoadingSimilar {
+                    SkeletonList(rows: 5)
+                } else if model.similarMails.isEmpty {
+                    EmptyStateView(content: EmptyStates.similar(hasVectors: model.vectorCount > 0))
+                } else {
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(model.similarMails) { hit in
+                                SimilarRow(hit: hit) { model.openSimilar(hit) }
+                            }
+                        }
+                        .padding(16)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(width: 440, height: 540)
+        .background(Theme.surface)
+    }
+}
+
+/// Benzer mailler listesindeki tek satır: gönderen + konu + benzerlik yüzdesi çipi.
+private struct SimilarRow: View {
+    let hit: SearchHit
+    let action: () -> Void
+
+    // Normalize vektörlerde skor = kosinüs [-1, 1]; yüzdeyi [0, 100] aralığına kırp.
+    private var percent: Int { max(0, min(100, Int((hit.score * 100).rounded()))) }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Avatar(name: hit.fromName, email: hit.fromAddress, size: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(hit.subject ?? "(konu yok)").font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(hit.fromName ?? hit.fromAddress ?? "—").font(.system(size: 10))
+                        .foregroundStyle(Theme.muted).lineLimit(1)
+                }
+                Spacer()
+                if !hit.attachments.isEmpty {
+                    Image(systemName: "paperclip").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                }
+                Chip(text: "%\(percent)", systemImage: "sparkles")
+                    .help("Anlamsal benzerlik: %\(percent)")
+            }
+            .padding(10)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusSmall))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
 

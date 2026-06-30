@@ -125,6 +125,12 @@ final class AppModel {
     var expansionChips: [String] = []    // PRF ile sorguya eklenen terimler (gösterim)
     var highlightTerms: [String] = []    // sonuç snippet'lerinde vurgulanacak terimler (temizlenmiş sorgu + genişletme)
 
+    // Benzer mailler (embedding tabanlı more-like-this) — yalnız kullanıcı isteyince yüklenir.
+    var similarMails: [SearchHit] = []
+    var isLoadingSimilar = false
+    var showSimilarSheet = false
+    var similarSourceSubject: String?    // benzerlerin ait olduğu mailin konusu (sheet başlığı için)
+
     // Filtre
     var filterAccount = ""          // "" → tüm hesaplar (accountID)
     var dateRange: DateRange = .all
@@ -176,12 +182,15 @@ final class AppModel {
     }
 
     var selectedHit: SearchHit? {
-        results.first { $0.id == selection }
-            ?? selectedThread.first { $0.id == selection }
-            ?? needsReply.first { $0.id == selection }
-            ?? waitingOn.first { $0.id == selection }
-            ?? personMails.first { $0.id == selection }
-            ?? conversation.flatMap(\.cited).first { $0.id == selection }
+        guard let selection else { return nil }
+        func find(_ hits: [SearchHit]) -> SearchHit? { hits.first { $0.id == selection } }
+        return find(results)
+            ?? find(selectedThread)
+            ?? find(needsReply)
+            ?? find(waitingOn)
+            ?? find(personMails)
+            ?? find(similarMails)
+            ?? find(conversation.flatMap(\.cited))
     }
 
     /// Açık bölüme göre klavyeyle gezinilebilir aktif mail id listesi (görünen sırayla).
@@ -863,6 +872,30 @@ final class AppModel {
             return
         }
         NSWorkspace.shared.open(url)
+    }
+
+    /// "Benzer mailler": verilen mailin embedding vektörüne en yakın mailleri arka planda bulur
+    /// ve sheet'i açar. Vektörler zaten hazır olduğundan Providers (LLM/embedder) gerekmez.
+    func loadSimilar(messageID id: String) {
+        similarSourceSubject = selectedHit?.subject
+        similarMails = []
+        isLoadingSimilar = true
+        showSimilarSheet = true
+        Task {
+            let hits = await background { () -> [SearchHit] in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                return try store.similar(toMessageID: id, limit: 20)
+            }
+            isLoadingSimilar = false
+            similarMails = hits ?? []
+        }
+    }
+
+    /// Benzer mailler listesinden bir maile geçer: sheet'i kapatır, seçimi değiştirir ve detayını yükler.
+    func openSimilar(_ hit: SearchHit) {
+        showSimilarSheet = false
+        selection = hit.id
+        loadSelected()
     }
 
     func runAsk() {

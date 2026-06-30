@@ -111,6 +111,22 @@ final class EmptyStateContentTests: XCTestCase {
         XCTAssertEqual(c.systemImage, "paperclip")
     }
 
+    // MARK: - Benzer mailler
+
+    func testSimilarWithoutVectorsInvitesEmbedding() {
+        let c = EmptyStates.similar(hasVectors: false)
+        XCTAssertEqual(c.title, "Anlamsal benzerlik için gömme gerekli")
+        XCTAssertEqual(c.systemImage, "sparkles")
+        XCTAssertNil(c.actionLabel)
+    }
+
+    func testSimilarWithVectorsShowsNoMatch() {
+        let c = EmptyStates.similar(hasVectors: true)
+        XCTAssertEqual(c.title, "Benzer mail bulunamadı")
+        XCTAssertEqual(c.systemImage, "square.stack.3d.up")
+        XCTAssertNil(c.actionLabel)
+    }
+
     // MARK: - Tutarlılık
 
     /// Tüm indeksleme davetleri aynı CTA etiketini ve ikonunu kullanır (tutarlı dil).
