@@ -121,6 +121,26 @@ public enum TurkishMonth {
     }
 }
 
+/// Haftanın bir gününe düşen mail sayısı ("Genel Bakış" haftanın günü grafiği için).
+/// `weekday`: SABİT 1=Pazartesi ... 7=Pazar (locale firstWeekday'den bağımsız, deterministik).
+public struct WeekdayCount: Sendable, Equatable, Identifiable {
+    public let weekday: Int        // 1=Pazartesi .. 7=Pazar
+    public let count: Int
+    public var id: Int { weekday }
+    public init(weekday: Int, count: Int) { self.weekday = weekday; self.count = count }
+}
+
+/// Haftanın gün numarasını (1=Pazartesi ... 7=Pazar) kısa Türkçe ada çeviren saf, paylaşılan
+/// yardımcı ("Pzt"). Grafik ekseni etiketleri bunu kullanır (TurkishMonth deseni gibi).
+/// Aralık dışındaysa nil döner; çağıran uygun bir geri-dönüş seçer.
+public enum TurkishWeekday {
+    public static let shortNames = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
+    public static func short(_ weekday: Int) -> String? {
+        guard (1...7).contains(weekday) else { return nil }
+        return shortNames[weekday - 1]
+    }
+}
+
 /// Bir kişinin mini analitiği ("Kişiler" detayında gösterilir).
 public struct SenderDetail: Sendable, Equatable {
     public let total: Int
@@ -879,6 +899,26 @@ public final class IndexStore: Sendable {
             MonthSentReceived(year: $0.year, month: $0.month,
                               received: received[$0.label] ?? 0, sent: sent[$0.label] ?? 0)
         }
+    }
+
+    /// Tarihi olan TÜM maillerin haftanın gününe göre dağılımı ("Genel Bakış" haftanın günü grafiği).
+    /// Bucket'lama Swift'te yapılır (`monthlyCounts` deseni; `calendar` enjekte → deterministik test).
+    /// Her zaman 7 eleman döner: Pazartesi→Pazar sırasında (eksik gün count=0). `weekday` SABİT
+    /// 1=Pazartesi ... 7=Pazar (locale firstWeekday'den bağımsız); `calendar.component(.weekday)`
+    /// Pazar=1..Cmt=7 verir, bunu SABİT eşlemeye dönüştürür. `now`, monthlyCounts ile imza tutarlılığı
+    /// için alınır (bucket'lamada kullanılmaz — pencere yok, tüm tarihler sayılır).
+    public func weekdayCounts(now: Date, calendar: Calendar = .current) throws -> [WeekdayCount] {
+        let dates: [Date] = try dbQueue.read { db in
+            try Date.fetchAll(db, sql: "SELECT date FROM message")
+        }
+        var counts: [Int: Int] = [:]
+        for d in 1...7 { counts[d] = 0 }
+        for date in dates {
+            // Gregoryen Pazar=1..Cmt=7 → SABİT Pzt=1..Paz=7 (locale'den bağımsız, deterministik).
+            let weekday = (calendar.component(.weekday, from: date) + 5) % 7 + 1
+            counts[weekday]! += 1
+        }
+        return (1...7).map { WeekdayCount(weekday: $0, count: counts[$0] ?? 0) }
     }
 
     /// Bir kişinin (gönderen adresi) mini analitiği: toplam, ekli sayısı, ilk/son tarih.

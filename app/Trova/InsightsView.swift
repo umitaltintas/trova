@@ -10,6 +10,7 @@ struct InsightsColumn: View {
     private var noBalanceData: Bool {
         model.monthlyBalance.allSatisfy { $0.received == 0 && $0.sent == 0 }
     }
+    private var noWeekdayData: Bool { model.weekdayActivity.allSatisfy { $0.count == 0 } }
 
     var body: some View {
         Group {
@@ -87,6 +88,25 @@ struct InsightsColumn: View {
                     .padding(14).cardSurface()
                 }
 
+                // Haftanın günü: tüm maillerin Pazartesi→Pazar dağılımı (7 çubuk).
+                // Veri yoksa kartı tamamen gizle (boş gürültü olmasın).
+                if !noWeekdayData {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Haftanın günü").font(.rounded(13, .semibold)).foregroundStyle(Theme.ink)
+                        Chart(model.weekdayActivity) { item in
+                            BarMark(
+                                x: .value("Gün", item.shortLabel),
+                                y: .value("Mail", item.count)
+                            )
+                            .foregroundStyle(Theme.accent.gradient)
+                            .cornerRadius(3)
+                        }
+                        .frame(height: 200)
+                        .chartYAxis { AxisMarks(position: .leading) }
+                    }
+                    .padding(14).cardSurface()
+                }
+
                 if !model.people.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("En çok yazışılanlar").font(.rounded(13, .semibold)).foregroundStyle(Theme.ink)
@@ -143,4 +163,9 @@ extension MonthCount {
 /// MonthSentReceived → grafik ekseni için kısa Türkçe ay etiketi ("Kas"); aynı paylaşılan yardımcı.
 extension MonthSentReceived {
     var shortLabel: String { TurkishMonth.short(month) ?? "\(month)" }
+}
+
+/// WeekdayCount → grafik ekseni için kısa Türkçe gün etiketi ("Pzt"); paylaşılan TurkishWeekday yardımcısı.
+extension WeekdayCount {
+    var shortLabel: String { TurkishWeekday.short(weekday) ?? "\(weekday)" }
 }

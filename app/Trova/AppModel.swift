@@ -77,6 +77,7 @@ final class AppModel {
     // Genel Bakış (insights)
     var monthly: [MonthCount] = []
     var monthlyBalance: [MonthSentReceived] = []   // aylık gelen vs gönderilen dağılımı
+    var weekdayActivity: [WeekdayCount] = []       // haftanın gününe göre mail dağılımı
     var attachmentTotal = 0
 
     // Ekler görünümü (tüm eklerin ada/türe göre aranabilir listesi)
@@ -653,15 +654,17 @@ final class AppModel {
     /// "Genel Bakış" verilerini (aylık hacim + ekli sayısı) arka planda tazeler.
     func loadInsights() {
         Task {
-            guard let data = await background({ () -> (monthly: [MonthCount], balance: [MonthSentReceived], attachments: Int) in
+            guard let data = await background({ () -> (monthly: [MonthCount], balance: [MonthSentReceived], weekday: [WeekdayCount], attachments: Int) in
                 let store = try IndexStore(path: AppPaths.databaseURL)
-                let now = Date()   // aylık hacim ve gelen/gönderilen aynı now/calendar ile bucket'lanır
+                let now = Date()   // aylık hacim, gelen/gönderilen ve haftanın günü aynı now/calendar ile bucket'lanır
                 return (try store.monthlyCounts(months: 12, now: now),
                         try store.monthlySentReceived(months: 12, now: now),
+                        try store.weekdayCounts(now: now),
                         try store.attachmentCount())
             }) else { return }
             monthly = data.monthly
             monthlyBalance = data.balance
+            weekdayActivity = data.weekday
             attachmentTotal = data.attachments
         }
     }
