@@ -1127,7 +1127,12 @@ private struct ReadingPane: View {
                     }
                     HStack(spacing: 6) {
                         Chip(text: hit.mailbox, systemImage: "tray")
-                        ForEach(hit.attachments, id: \.self) { Chip(text: $0, systemImage: "paperclip") }
+                        ForEach(hit.attachments, id: \.self) { name in
+                            Button { model.openAttachment(named: name) } label: {
+                                Chip(text: name, systemImage: "paperclip")
+                            }
+                            .buttonStyle(.plain).help("Eki aç")
+                        }
                         Spacer()
                         Button {
                             Exporter.copy(MarkdownExporter.email(hit, body: model.selectedBody))

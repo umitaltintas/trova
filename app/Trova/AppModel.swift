@@ -523,6 +523,33 @@ final class AppModel {
         }
     }
 
+    /// Seçili mailden verilen adlı eki çıkarıp geçici bir dosyaya yazar ve sistemde açar.
+    func openAttachment(named name: String) {
+        guard let id = selection else { return }
+        Task {
+            let result = await background { () -> URL? in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                guard let path = try store.filePath(forID: id),
+                      let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+                guard let att = EMLXParser.extractAttachments(data: data)
+                    .first(where: { $0.filename == name }) else { return nil }
+                // Dosya adını güvenli kıl (yol bileşeni kaçışını önle).
+                let safe = (att.filename as NSString).lastPathComponent
+                let fileName = safe.isEmpty ? "ek" : safe
+                let dir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("trova-ekler", isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let fileURL = dir.appendingPathComponent(fileName)
+                try att.data.write(to: fileURL)
+                return fileURL
+            }
+            guard let url = result.flatMap({ $0 }) else {
+                errorMessage = "Ek açılamadı: \(name)"; return
+            }
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// Seçili maili native Apple Mail.app'te açar (message:// derin-linki). Message-ID yoksa hata gösterir.
     func openInMail() {
         guard let url = MailLink.appleMailURL(messageID: selectedMessageID) else {
