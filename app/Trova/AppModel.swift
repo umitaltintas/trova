@@ -504,18 +504,23 @@ final class AppModel {
     }
 
     /// Sağlayıcı yapılandırma bayraklarını ağır nesne kurmadan (yalnız anahtar/ayar okuyarak) tazeler.
+    /// Bu açılış yolunda (onAppear → refreshAccess) çalıştığından Keychain okuması ANA THREAD
+    /// DIŞINDA yapılır: senkron okuma, yeniden imzalama sonrası onay diyaloğu beklerken ana
+    /// thread'i kilitleyip "0 pencere" açılış donmasına yol açardı. Bayraklar anahtarlar
+    /// gelince (Task MainActor'a dönünce) güncellenir; UI @Observable ile kendini tazeler.
     func refreshProviders() {
-        let defaults = UserDefaults.standard
-        let provider = defaults.string(forKey: SettingsKeys.embedProvider) ?? "local"
-        let embedKey = Keychain.get(KeychainKeys.embedKey)
-        let llmKey = Keychain.get(KeychainKeys.llmKey)
+        let provider = UserDefaults.standard.string(forKey: SettingsKeys.embedProvider) ?? "local"
+        Task {
+            let embedKey = await Keychain.readAsync(KeychainKeys.embedKey)
+            let llmKey = await Keychain.readAsync(KeychainKeys.llmKey)
 
-        llmConfigured = !llmKey.isEmpty || OpenRouterClient.fromEnvironment() != nil
-        usesLocalEmbedder = provider == "local"
-        switch provider {
-        case "openai", "voyage": embedderConfigured = !embedKey.isEmpty
-        case "openrouter":       embedderConfigured = !(embedKey.isEmpty && llmKey.isEmpty)
-        default:                 embedderConfigured = true   // yerel her zaman kullanılabilir
+            llmConfigured = !llmKey.isEmpty || OpenRouterClient.fromEnvironment() != nil
+            usesLocalEmbedder = provider == "local"
+            switch provider {
+            case "openai", "voyage": embedderConfigured = !embedKey.isEmpty
+            case "openrouter":       embedderConfigured = !(embedKey.isEmpty && llmKey.isEmpty)
+            default:                 embedderConfigured = true   // yerel her zaman kullanılabilir
+            }
         }
     }
 

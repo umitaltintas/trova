@@ -16,8 +16,12 @@ struct SettingsView: View {
 
     @Environment(AppModel.self) private var model
 
-    @State private var embedKey = Keychain.get(KeychainKeys.embedKey)
-    @State private var llmKey = Keychain.get(KeychainKeys.llmKey)
+    // Anahtarlar init'te DEĞİL, açıldıktan sonra ana thread dışında yüklenir (aşağıdaki .task).
+    // Senkron `Keychain.get` init'ten çağrılsaydı, yeniden imzalama sonrası onay diyaloğu
+    // beklerken ana thread kilitlenir ve pencere hiç açılmazdı (donma). Yüklenene dek boş.
+    @State private var embedKey = ""
+    @State private var llmKey = ""
+    @State private var keysLoaded = false
 
     var body: some View {
         TabView {
@@ -36,7 +40,14 @@ struct SettingsView: View {
                     TextField("Boyut (opsiyonel)", text: $embedDim)
                 } else if embedProvider != "local" {
                     SecureField("API anahtarı", text: $embedKey)
-                        .onChange(of: embedKey) { _, value in Keychain.set(value, for: KeychainKeys.embedKey) }
+                        // keysLoaded kontrolü: async yükleme sırasında alanın boştan gerçek
+                        // anahtara dolması onChange'i tetikler; bu ilk doldurmayı yeniden
+                        // Keychain'e YAZMAMAK için yükleme bitmeden kaydetmiyoruz.
+                        .onChange(of: embedKey) { _, value in
+                            guard keysLoaded else { return }
+                            Keychain.set(value, for: KeychainKeys.embedKey)
+                        }
+                    if !keysLoaded { keyLoadingIndicator }
                     TextField("Model (opsiyonel)", text: $embedModel)
                     TextField("Boyut (opsiyonel)", text: $embedDim)
                 }
@@ -50,7 +61,12 @@ struct SettingsView: View {
 
             Form {
                 SecureField("OpenRouter API anahtarı", text: $llmKey)
-                    .onChange(of: llmKey) { _, value in Keychain.set(value, for: KeychainKeys.llmKey) }
+                    // Bkz. embedKey: async yüklemedeki ilk doldurmayı yeniden yazma.
+                    .onChange(of: llmKey) { _, value in
+                        guard keysLoaded else { return }
+                        Keychain.set(value, for: KeychainKeys.llmKey)
+                    }
+                if !keysLoaded { keyLoadingIndicator }
                 TextField("Model", text: $llmModel)
                 Text("Örn. anthropic/claude-sonnet-4.6, openai/gpt-4o-mini. "
                    + "Anahtar Keychain'de saklanır.")
@@ -178,6 +194,22 @@ struct SettingsView: View {
             .onAppear { model.refreshStatus() }
         }
         .frame(width: 480, height: 460)
+        .task {
+            // Anahtarları ANA THREAD DIŞINDA yükle: yeniden imzalama sonrası Keychain onay
+            // diyaloğu beklerken senkron okuma pencereyi/paneli kilitlerdi. Gelene dek alanlar
+            // boş kalır; keysLoaded sonradan true olur ve onChange kaydetmeye başlar.
+            embedKey = await Keychain.readAsync(KeychainKeys.embedKey)
+            llmKey = await Keychain.readAsync(KeychainKeys.llmKey)
+            keysLoaded = true
+        }
+    }
+
+    /// Anahtarlar arka planda yüklenirken gösterilen küçük ilerleme satırı.
+    private var keyLoadingIndicator: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text("Anahtar yükleniyor…").font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
 
