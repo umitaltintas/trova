@@ -16,7 +16,9 @@ bağlanmaya gerek yoktur** — tek gereksinim Full Disk Access iznidir.
 **Gizlilik:** Her şey varsayılan olarak yerelde çalışır. Embedding'ler yerelde
 üretilebilir; yalnızca bir bulut sağlayıcı yapılandırırsanız özet/sıralama için kısa
 parçalar API'ye gider. Mail HTML'i gösterilmeden önce temizlenir — uzak görseller
-(izleme pikselleri), script ve olay işleyicileri kaldırılır.
+(izleme pikselleri), script ve olay işleyicileri kaldırılır. **Yanıtla / Yeni e-posta**
+yalnızca oluşturma penceresini açar (otomatik **göndermez**); yıldızlama Trova-yereldir
+(Apple Mail'e yazmaz).
 
 Üç parça, tek SQLite indeksi:
 
@@ -35,30 +37,39 @@ parçalar API'ye gider. Mail HTML'i gösterilmeden önce temizlenir — uzak gö
   **self-critique** (yanıttaki iddiaları kaynak maillerle doğrulama, ayar açıksa), takip
   sorularını anlayan sohbet geçmişi. Tüm sohbet Markdown'a dışa aktarılabilir.
 - **Ara** — kelime / anlamsal / hibrit. Güçlü sorgu dili:
-  - Türkçe **doğal dil tarih** filtresi: `son 7 gün fatura`, `dün toplantı`, `geçen ay maaş`.
+  - Türkçe **doğal dil tarih** filtresi: `son 7 gün fatura`, `dün toplantı`, `geçen ay maaş`;
+    ayrıca tek tıkla **hızlı tarih çipleri** (bugün · 7g · 30g · bu yıl).
   - **Operatörler**: `from:ali` / `gönderen:veli`, `has:attachment` / `has:ek`, ve ek türü
     `has:pdf` · `ek:görsel` · `tür:tablo` (PDF · Görsel · Tablo · Belge · Sunum · Arşiv · Ses · Video · Kod).
+    Gelişmiş sözdizimi: `"tam ifade"` ve `-dışlanan` terim.
   - **Snippet + terim vurgusu**, opsiyonel **PRF sorgu genişletme**, thread çeşitlendirme,
     opsiyonel **AI yeniden sıralama (reranking)**.
-  - **Kayıtlı aramalar** (yer imi) ve **son aramalar**.
+  - **Süzme + düzen**: okunmadı · bayraklı · yıldızlı filtreleri, gönderen **facet'iyle daraltma**,
+    **sıralama** (alaka / yeni / eski) + sonuç sayacı, tek tıkla **filtreleri temizle** ve isteğe
+    bağlı **konuşmalara göre gruplama** (thread'leri katlanabilir tek başlıkta topla).
+  - **Çoklu seçim + toplu aksiyon**: seçili mailleri toplu **yıldızla** ya da Markdown/CSV **dışa aktar**.
+  - **Kayıtlı aramalar** (yer imi — **canlı eşleşme sayacı**yla akıllı klasör) ve **son aramalar**.
 - **Bugün** — proaktif brifing: LLM günlük özet + **yanıt gerekiyor** / **yanıt bekliyor**
-  triyajı (yerel Gönderilenler avantajıyla). Digest Markdown'a aktarılabilir.
-- **Kişiler** — en çok yazışılanlar; bir kişiyi açınca tüm mailleri + **mini analitik**
-  (toplam · ekli · ilk–son iletişim). Listeyi Markdown'a aktarın.
-- **Genel Bakış** — istatistik kartları + son 12 ayın **aylık hacim grafiği** (Swift Charts).
+  triyajı (yerel Gönderilenler avantajıyla). Her öğede hızlı aksiyon (Yanıtla · Mail'de Aç · Yıldızla),
+  bir öğeyi **gizle/geri al** (yeni yanıt gelince tekrar belirir) ve digest'i Markdown'a dışa aktarma.
+- **Kişiler** — en çok yazışılanlar (ad/adres ile **aranabilir**); bir kişiyi açınca tüm mailleri
+  + **mini analitik** (toplam · ekli · ilk–son iletişim). Listeyi Markdown'a aktarın.
+- **Genel Bakış** — istatistik kartları + son 12 ayın **aylık hacim** ve **gelen/gönderilen**
+  grafikleri, **haftanın günü** dağılımı ve en çok yazışılanlar (Swift Charts).
 - **Ekler** — ekleri ada ve **türe** göre arayıp tek tıkla aç; opt-in **ek içeriği araması**
   (PDF metni + düz metin) ile ek içinde geçen kelimeleri de bulur.
 
-Okuma panelinde: güvenli HTML render, konu (thread) şeridi ve tek tıkla
-**"Konuyu özetle"**, **eki açma**, **"Mail'de Aç"** (native Mail.app `message://` derin-linki),
-**Yanıtla / Yeni e-posta** (`mailto:`), **Benzer mailler** (embedding tabanlı more-like-this)
-ve maili/yanıtı **Markdown kopyala/dışa aktar**. AI çıktıları blok-markdown olarak render edilir
-(başlık · liste · kod).
+Okuma panelinde güvenli HTML render ve **konuşma zaman çizelgesi** — thread mailleri Message-ID ile
+tekilleştirilip kronolojik dikey bir akışta gösterilir; tek tıkla **"Konuyu özetle"** veya konuşmanın
+tamamını **Markdown/CSV dışa aktar**. Ayrıca **eki açma**, **"Mail'de Aç"** (native Mail.app
+`message://` derin-linki), **Yanıtla / Yeni e-posta** (`mailto:`), **AI yanıt taslağı** (oku → taslak →
+Mail'de yanıtla), **Trova-yerel yıldızlama**, **Benzer mailler** (embedding tabanlı more-like-this) ve
+maili **Markdown kopyala/dışa aktar**. AI çıktıları blok-markdown olarak render edilir (başlık · liste · kod).
 
-Hız ve canlılık: **⌘K komut paleti** (bulanık arama), **⌘1–6** bölümler, ↑/↓ ile liste
-gezinme. **FSEvents** ile `~/Library/Mail` izlenir; yeni mail geldiğinde **artımlı indeksleme
-otomatik** tetiklenir. İlk çalıştırmadaki **Sağlık paneli** Full Disk Access / indeks /
-anahtar / embedding durumunu adım adım yönlendirir.
+Hız ve canlılık: **⌘K komut paleti** (bulanık arama), **⌘1–6** bölümler, ↑/↓ ile liste gezinme,
+**⌘/** kısayol kılavuzu. **FSEvents** ile `~/Library/Mail` izlenir; yeni mail geldiğinde **artımlı
+indeksleme otomatik** tetiklenir ve kenar çubuğunda **"N yeni mail"** rozeti belirir. İlk çalıştırmadaki
+**Sağlık paneli** Full Disk Access / indeks / anahtar / embedding durumunu adım adım yönlendirir.
 
 ```sh
 brew install xcodegen          # bir kez
@@ -76,8 +87,8 @@ open Trova.xcodeproj           # Xcode'da ⌘R (otomatik imza)
 - **`.emlx` ayrıştırıcı**: MIME çok parçalılık, `base64` / `quoted-printable`, IANA charset
   çözümü (Türkçe `iso-8859-9` / `windows-1254` dahil), RFC 2047 encoded-word başlıkları,
   HTML→metin ve ek (attachment) çıkarımı.
-- **SQLite + FTS5** tam metin indeksi. Türkçe için ön ek (prefix) eşleme: "fatura" →
-  "faturanız", "faturası" da bulunur. Ek dosya adları da indekslenir.
+- **SQLite + FTS5** tam metin indeksi (GRDB; şema **v14**'e kadar otomatik göç ettirilir). Türkçe için
+  ön ek (prefix) eşleme: "fatura" → "faturanız", "faturası" da bulunur. Ek dosya adları da indekslenir.
 - **Anlamsal arama**: `EmbeddingProvider` protokolü (pluggable). Vektörler BLOB olarak
   saklanır; `vDSP` ile kosinüs benzerliği. `Searcher`, FTS ile vektörü **RRF** (Reciprocal
   Rank Fusion) ile birleştirir.
@@ -106,9 +117,12 @@ trova embed                                # anlamsal gömme üret (yerel veya A
 trova search "kira sözleşmesi"             # hibrit arama (FTS + anlamsal, varsayılan)
 trova search "ev taşınma" --mode semantic  # sadece anlamsal
 trova search "fatura" --mode fts           # sadece anahtar kelime
+trova count "son 7 gün fatura"             # sorguya uyan mail SAYISI (operatör + tarih ayrıştırılır)
 trova ask "geçen ay kira ile ilgili mailleri özetle"   # tek-tur özet (OpenRouter)
 trova agent "kira sözleşmem ne zaman doluyor"          # çok adımlı ajan (OpenRouter)
 trova accounts                             # hesap bazında kayıt sayısı
+trova attachments fatura --kind pdf        # ekleri ada/türe/göndericiye göre listele
+trova pinned                               # Trova-yerel yıldızlı mailleri listele
 ```
 
 Ortak `--db <yol>` seçeneği ile farklı bir veritabanı kullanılabilir. `ask` ve `agent`
@@ -172,7 +186,7 @@ Aynı sekmede ajan hafızasını ve opt-in ek içeriği indeksini de yönetebili
 
 ```sh
 swift build        # çekirdek + CLI
-swift test         # birim testleri (ayrıştırma, arama, ajan araçları, parser'lar…)
+swift test         # 560 birim testi (ayrıştırma, arama, ajan araçları, dışa aktarma, parser'lar…)
 ```
 
 Gereksinimler: **macOS 14+ (Sonoma)**, **Swift 6** araç zinciri (Package.swift / project.yml),
