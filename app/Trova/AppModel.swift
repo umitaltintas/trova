@@ -370,6 +370,29 @@ final class AppModel {
         CsvExporter.emailList(listItems(similarMails))
     }
 
+    /// Seçili konuşmanın (thread) TAMAMINI `ConversationTimeline` sırasıyla Markdown'a döker.
+    /// Her mesajın tam gövdesini DB'den okur; seçili mailin zaten yüklü (`selectedBody`) gövdesini
+    /// yeniden okumaz. Konuşmalar genelde küçük olduğundan tek tek okuma kabul edilir; okuma
+    /// başarısızsa o mesaj snippet'e düşer (ConversationExporter halleder).
+    func exportConversation() -> String {
+        let ordered = ConversationTimeline.timeline(selectedThread)
+        let store = try? IndexStore(path: AppPaths.databaseURL)
+        func bodyFor(_ hit: SearchHit) -> String? {
+            if hit.id == selection, let body = selectedBody { return body }
+            guard let store else { return nil }
+            return (try? store.body(forID: hit.id)) ?? nil
+        }
+        let messages = ordered.map { (hit: $0, body: bodyFor($0)) }
+        let subject = selectedHit?.subject ?? ordered.first?.subject
+        return ConversationExporter.markdown(subject: subject, messages: messages)
+    }
+
+    /// Seçili konuşmayı CSV'ye döker (Özet sütunu snippet'ten gelir; tam gövde okuması gerekmez).
+    func exportConversationCSV() -> String {
+        let ordered = ConversationTimeline.timeline(selectedThread)
+        return ConversationExporter.csv(messages: ordered.map { (hit: $0, body: nil) })
+    }
+
     func cancelJob() {
         cancelFlag?.cancel()
         currentTask?.cancel()

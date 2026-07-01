@@ -281,6 +281,12 @@ private struct ConversationSection: View {
         model.threadSummary != nil && model.summaryThreadKey == model.selectedHit?.threadKey
     }
 
+    /// Dışa aktarma dosya adı: "Konuşma <konu>" (konu boşsa yalnız "Konuşma").
+    private var exportFilename: String {
+        let subject = (model.selectedHit?.subject ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return subject.isEmpty ? "Konuşma" : "Konuşma \(subject)"
+    }
+
     var body: some View {
         // Tekilleştirilmiş, kronolojik akış — hem başlık sayısı hem liste bunu kullanır.
         let rows = ConversationTimeline.timeline(model.selectedThread)
@@ -312,6 +318,12 @@ private struct ConversationSection: View {
                     }
                     .buttonStyle(.plain).font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.accent)
                 }
+
+                // Konuşmanın tamamını (zaman çizelgesi sırasıyla) tek dosyaya aktar.
+                ListExportMenu(markdown: { model.exportConversation() },
+                               csv: { model.exportConversationCSV() },
+                               filename: exportFilename)
+                    .help("Konuşmanın tamamını Markdown ya da CSV olarak dışa aktar")
             }
             .padding(.horizontal, 16).padding(.top, 8)
 
