@@ -54,18 +54,15 @@ struct ContentView: View {
                 .help("Komut paleti (⌘K)")
             }
         }
-        // KÖK NEDEN DÜZELTMESİ: NavigationSplitView'i destekleyen NSSplitView, AppKit'in otomatik
-        // kayıt (autosave) mekanizmasıyla önceki bir pencere/ekran boyutundan kalma alt-görünüm
-        // YÜKSEKLİĞİNİ ("NSSplitView Subview Frames …") geri yüklüyor; bu değer GÜNCEL pencere
-        // yüksekliğiyle uyuşmadığında (ekran görüntüsüyle doğrulandı: kayıtlı 1526pt'e karşı
-        // gerçek pencere 572pt) kenar çubuğunun TÜM içeriği görünüm alanının DIŞINA taşıyor —
-        // kenar çubuğu tamamen BOŞ görünüyor. Bu uygulamadaki panel genişlikleri zaten kod içinde
-        // (navigationSplitViewColumnWidth) sabitlendiğinden autosave'in kattığı hiçbir değer yok,
-        // yalnız risk taşıyor — bu yüzden aşağıdaki düzeltme KOŞULSUZ devreye girer: pencere her
-        // göründüğünde tüm NSSplitView'lerin autosave adını kalıcı olarak temizler (bozuk geri
-        // yüklemeyi bir daha asla yapmasın/kaydetmesin) ve `adjustSubviews()` ile alt görünümleri
-        // GERÇEK güncel sınırlara göre yeniden hesaplatır.
-        .background(SplitViewAutosaveFixer())
+        // NOT: Çalışma-zamanı NSSplitView autosave düzeltmesi (eski `SplitViewAutosaveFixer`)
+        // KASITLI OLARAK KALDIRILDI — geri eklemeyin. O yardımcı, eski özel VStack/ScrollView
+        // kenar çubuğu için yazılmıştı; yerel `List(.sidebar)` ise kendi NSScrollView yerleşimini
+        // AppKit ile uyumlu biçimde kendisi yönetir. Fixer HER SwiftUI güncellemesinde
+        // `adjustSubviews()` çağırıyordu; veri yükleyen sütunlar (Sor/Ara) model'i sık
+        // güncellediğinde bu, kenar çubuğunun iç yerleşimini sürekli sıfırlayıp satırları GÖRÜNMEZ
+        // yapıyordu (kenar çubuğu bomboş kalıyordu). Bayat "NSSplitView Subview Frames …"
+        // autosave'inin pencere kurulmadan ÖNCE silinmesi olan asıl açılış-anı koruması ise
+        // `TrovaApp.init()` içinde DURUYOR ve tek başına yeterli.
         .task { model.onAppear(); if autoSync { model.setAutoSync(true) } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.refreshAccess(); model.refreshStatus() }
@@ -74,47 +71,6 @@ struct ContentView: View {
         .background { KeyboardShortcuts(showPalette: $showPalette) }
         .sheet(isPresented: $showPalette) { CommandPaletteView().environment(model) }
         .sheet(isPresented: $model.showShortcuts) { ShortcutsSheet() }
-    }
-}
-
-/// Görünmez yardımcı: ana pencereyi bulup içindeki `NSSplitView`lerin (NavigationSplitView'in
-/// AppKit karşılığı) eski/uyumsuz autosave durumunu KOŞULSUZ olarak temizler. Bkz. `ContentView`
-/// içindeki "KÖK NEDEN DÜZELTMESİ" yorumu. Pencere göründüğünde ve her içerik güncellemesinde
-/// tekrar çalışır ki SwiftUI, NavigationSplitView'i yeniden kurarken autosave adını yeniden atasa
-/// bile düzeltme kalıcı olsun.
-private struct SplitViewAutosaveFixer: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let probe = NSView(frame: .zero)
-        scheduleFix(from: probe)
-        return probe
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        scheduleFix(from: nsView)
-    }
-
-    private func scheduleFix(from probe: NSView) {
-        // Pencere/contentView hemen hazır olmayabilir; birkaç kez deneyerek geç bağlanan
-        // durumları da (ör. SwiftUI'nin split view'ı yeniden kurduğu anlar) yakala.
-        for delay in [0.0, 0.2, 0.6, 1.5] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak probe] in
-                guard let probe, let window = probe.window, let contentView = window.contentView else { return }
-                for splitView in contentView.descendantSplitViews() {
-                    splitView.autosaveName = nil
-                    splitView.adjustSubviews()
-                }
-            }
-        }
-    }
-}
-
-private extension NSView {
-    /// Bu görünümün altındaki tüm `NSSplitView` torunlarını (kendisi dahil) derinlik-öncelikli tarar.
-    func descendantSplitViews() -> [NSSplitView] {
-        var result: [NSSplitView] = []
-        if let splitView = self as? NSSplitView { result.append(splitView) }
-        for sub in subviews { result.append(contentsOf: sub.descendantSplitViews()) }
-        return result
     }
 }
 
