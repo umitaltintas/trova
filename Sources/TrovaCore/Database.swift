@@ -730,9 +730,11 @@ public final class IndexStore: Sendable {
     /// Bir thread'deki (aynı konu anahtarı) tüm mailleri tarihe göre döndürür.
     public func thread(forKey key: String) throws -> [SearchHit] {
         try dbQueue.read { db in
+            // messageID de seçilir: konuşma zaman çizelgesi (ConversationTimeline) aynı mantıksal
+            // mailin farklı kutulardaki kopyalarını RFC822 messageID'ye göre tekilleştirir.
             try Row.fetchAll(db, sql: """
-                SELECT id, subject, fromName, fromAddress, mailbox, date, threadKey, attachments,
-                       isRead, isFlagged, snippet AS snip, 0.0 AS score
+                SELECT id, messageID, subject, fromName, fromAddress, mailbox, date, threadKey,
+                       attachments, isRead, isFlagged, snippet AS snip, 0.0 AS score
                 FROM message WHERE threadKey = ? ORDER BY date
                 """, arguments: [key]).map(Self.hit(from:))
         }

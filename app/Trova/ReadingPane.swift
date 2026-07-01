@@ -162,7 +162,7 @@ struct ReadingPane: View {
 
                 if model.selectedThread.count > 1 {
                     Divider().overlay(Theme.line)
-                    ThreadStrip()
+                    ConversationSection()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -262,19 +262,48 @@ private struct SimilarRow: View {
     }
 }
 
-private struct ThreadStrip: View {
+/// Okuma panelinin altındaki katlanabilir "Konuşma" bölümü: seçili mailin konusundaki (thread)
+/// mailleri `ConversationTimeline` ile tekilleştirip kronolojik (en eski üstte) dikey bir zaman
+/// çizelgesi olarak dizer. Başlıktan katlanır/açılır; açıkken (istenirse) konu özeti kartı + mesaj
+/// listesi gösterilir. Uzun konuşma okuma panelini yutmasın diye liste ~5 satırla sınırlı bir
+/// kaydırma alanındadır.
+private struct ConversationSection: View {
     @Environment(AppModel.self) private var model
+    /// Katlama durumu yereldir (varsayılan açık); AppModel'e state eklenmez.
+    @State private var expanded = true
+
+    /// Kaydırma yüksekliği hesabı için sabit satır ölçüleri.
+    private let rowHeight: CGFloat = 40
+    private let rowSpacing: CGFloat = 4
+    private let maxVisibleRows = 5
 
     private var showSummary: Bool {
         model.threadSummary != nil && model.summaryThreadKey == model.selectedHit?.threadKey
     }
 
     var body: some View {
+        // Tekilleştirilmiş, kronolojik akış — hem başlık sayısı hem liste bunu kullanır.
+        let rows = ConversationTimeline.timeline(model.selectedThread)
+        let visible = min(rows.count, maxVisibleRows)
+        let scrollHeight = CGFloat(visible) * rowHeight + CGFloat(max(0, visible - 1)) * rowSpacing
+
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("BU KONUDA \(model.selectedThread.count) MAIL")
-                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.faint).tracking(0.6)
+            HStack(spacing: 6) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.faint)
+                        Text("KONUŞMA (\(rows.count) MAIL)")
+                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.faint).tracking(0.6)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(expanded ? "Konuşmayı katla" : "Konuşmayı aç")
+
                 Spacer()
+
                 if model.isSummarizing {
                     ProgressView().controlSize(.small)
                 } else {
@@ -286,39 +315,71 @@ private struct ThreadStrip: View {
             }
             .padding(.horizontal, 16).padding(.top, 8)
 
-            if showSummary, let summary = model.threadSummary {
-                ThreadSummaryCard(summary: summary)
-                    .padding(.horizontal, 16).padding(.vertical, 4)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(model.selectedThread) { message in
-                        Button {
-                            model.selection = message.id
-                            model.loadSelected()
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(message.fromName ?? message.fromAddress ?? "—")
-                                    .font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                                if let date = message.date {
-                                    Text(RelativeTime.short(date, now: Date()))
-                                        .font(.mono(9)).foregroundStyle(Theme.muted)
-                                        .help(RelativeTime.absolute(date))
-                                        .accessibilityLabel("Tarih: \(RelativeTime.absolute(date))")
-                                }
-                            }
-                            .padding(8).frame(width: 132, alignment: .leading)
-                            .background(message.id == model.selection ? Theme.accentSoft : Theme.card,
-                                        in: RoundedRectangle(cornerRadius: Theme.radiusSmall))
-                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.line))
-                        }
-                        .buttonStyle(.plain)
-                    }
+            if expanded {
+                if showSummary, let summary = model.threadSummary {
+                    ThreadSummaryCard(summary: summary)
+                        .padding(.horizontal, 16).padding(.vertical, 4)
                 }
-                .padding(.horizontal, 16).padding(.bottom, 10)
+
+                ScrollView(showsIndicators: true) {
+                    VStack(spacing: rowSpacing) {
+                        ForEach(rows) { message in
+                            ConversationRow(message: message, height: rowHeight)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(height: scrollHeight)
+                .padding(.bottom, 10)
             }
         }
+    }
+}
+
+/// Konuşma zaman çizelgesindeki tek satır: küçük avatar + gönderen adı + göreli tarih. Açık olan
+/// mail (`message.id == model.selection`) accentSoft dolgu + accent çerçeveyle vurgulanır; satıra
+/// dokununca o maile geçilir.
+private struct ConversationRow: View {
+    @Environment(AppModel.self) private var model
+    let message: SearchHit
+    let height: CGFloat
+
+    private var isCurrent: Bool { message.id == model.selection }
+
+    /// Erişilebilirlik etiketi: "<gönderen>, <mutlak tarih>".
+    private var a11yLabel: String {
+        let who = message.fromName ?? message.fromAddress ?? "Bilinmeyen gönderen"
+        if let date = message.date { return "\(who), \(RelativeTime.absolute(date))" }
+        return who
+    }
+
+    var body: some View {
+        Button {
+            model.selection = message.id
+            model.loadSelected()
+        } label: {
+            HStack(spacing: 8) {
+                Avatar(name: message.fromName, email: message.fromAddress, size: 26)
+                Text(message.fromName ?? message.fromAddress ?? "—")
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
+                    .lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 8)
+                if let date = message.date {
+                    Text(RelativeTime.short(date, now: Date()))
+                        .font(.mono(10)).foregroundStyle(Theme.faint)
+                        .help(RelativeTime.absolute(date))
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: height)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isCurrent ? Theme.accentSoft : Color.clear,
+                        in: RoundedRectangle(cornerRadius: Theme.radiusSmall))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall)
+                .stroke(isCurrent ? Theme.accent : Color.clear, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(a11yLabel)
     }
 }
 
