@@ -165,27 +165,40 @@ struct EmptyStateView: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: content.systemImage)
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(Theme.accent.opacity(0.7))
-                .accessibilityHidden(true)
-            Text(content.title).font(.rounded(16, .semibold)).foregroundStyle(Theme.ink)
-            Text(content.message)
-                .font(.system(size: 12)).foregroundStyle(Theme.muted)
-                .multilineTextAlignment(.center).frame(maxWidth: 300)
-                .fixedSize(horizontal: false, vertical: true)
-            if let label = content.actionLabel, let action {
-                Button(action: action) {
-                    Text(label).font(.rounded(13, .semibold))
+        // İçeriği bir ScrollView'e sarıyoruz — görsel bir gereksinim DEĞİL, KENAR ÇUBUĞU için:
+        // NavigationSplitView'de, kenar çubuğuna komşu içerik sütununun görünümünde kaydırılabilir
+        // bir view YOKKEN, kenar çubuğu List'inin üst güvenli-alan inset'i (başlık çubuğu / trafik
+        // ışıkları boşluğu) uygulanmıyor; satırlar trafik ışıklarının altına — hatta tümüyle görünür
+        // alanın dışına — kayıyordu (kenar çubuğu boş görünüyordu). Bu paylaşılan boş-durum görünümü
+        // her kolonda (Sor/Ara/Bugün/Kişiler/Ekler/Genel Bakış) kullanıldığından, buradaki ScrollView
+        // içerik sütununun boş durumda bile daima bir scroll view içermesini sağlar ve kenar çubuğu
+        // düzeni sağlam kalır. `containerRelativeFrame` ile içerik dikeyde ortalanır (eski görünümün
+        // korunması); tüm kullanımlar bir liste/scroll'a ALTERNATİF boş dal olduğundan iç içe scroll
+        // oluşmaz.
+        ScrollView {
+            VStack(spacing: 10) {
+                Image(systemName: content.systemImage)
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(Theme.accent.opacity(0.7))
+                    .accessibilityHidden(true)
+                Text(content.title).font(.rounded(16, .semibold)).foregroundStyle(Theme.ink)
+                Text(content.message)
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center).frame(maxWidth: 300)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let label = content.actionLabel, let action {
+                    Button(action: action) {
+                        Text(label).font(.rounded(13, .semibold))
+                    }
+                    .buttonStyle(.borderedProminent).tint(Theme.accent).controlSize(.large)
+                    .padding(.top, 4)
+                    .accessibilityHint("Postanı indekslemeyi başlatır")
                 }
-                .buttonStyle(.borderedProminent).tint(Theme.accent).controlSize(.large)
-                .padding(.top, 4)
-                .accessibilityHint("Postanı indekslemeyi başlatır")
             }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .containerRelativeFrame(.vertical, alignment: .center)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
     }
 }
 
