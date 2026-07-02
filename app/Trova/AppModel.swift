@@ -62,6 +62,9 @@ final class AppModel {
     var hasAccess = false
     var mailRoot: String?
     var totalCount = 0
+    // Okunmamış toplam sayısı (sanal "Okunmamışlar" klasörü rozeti). refreshStatus'ta ucuz
+    // COUNT ile tazelenir; yalnız isRead = 0 sayılır (isRead nil → SAYILMAZ, "kesin okunmamış").
+    var unreadTotal = 0
     var vectorCount = 0
     var memoryCount = 0
     var attachmentContentCount = 0   // ek içeriği indekslenmiş mail sayısı (Ayarlar göstergesi)
@@ -697,14 +700,17 @@ final class AppModel {
 
     func refreshStatus() {
         Task {
-            guard let stats = await background({ () -> (Int, Int, Int, Int, Int, [AccountStat]) in
+            guard let stats = await background({ () -> (Int, Int, Int, Int, Int, Int, [AccountStat]) in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 let accounts = try store.accountCounts().map { AccountStat(account: $0.account, count: $0.count) }
+                // Okunmamış toplam: yalnız isRead = 0 (kesin okunmamış); isRead nil olanlar SAYILMAZ.
+                let unread = try store.countMatching(query: nil, filter: SearchFilter(unreadOnly: true))
                 return (try store.count(), try store.vectorCount(), try store.memoryCount(),
-                        try store.attachmentContentCount(), try store.duplicateCount(), accounts)
+                        try store.attachmentContentCount(), try store.duplicateCount(), unread, accounts)
             }) else { return }
             totalCount = stats.0; vectorCount = stats.1; memoryCount = stats.2
-            attachmentContentCount = stats.3; duplicateCount = stats.4; accounts = stats.5
+            attachmentContentCount = stats.3; duplicateCount = stats.4
+            unreadTotal = stats.5; accounts = stats.6
             statusLoaded = true
         }
         refreshProviders()
@@ -1236,6 +1242,26 @@ final class AppModel {
         dateRange = .all
         activeSenderFilter = nil
         resultSort = .relevance
+        runSearch()
+    }
+
+    /// Sanal akıllı klasör: "Okunmamışlar". Ara bölümüne geçer, tüm filtreleri ve sorguyu sıfırlar,
+    /// yalnız okunmamış süzgecini açık bırakır ve browse yolunu (boş sorgu + filtre) tetikler.
+    func openVirtualUnread() {
+        section = .search
+        clearSearchFilters()
+        query = ""
+        unreadOnly = true
+        runSearch()
+    }
+
+    /// Sanal akıllı klasör: "Yıldızlılar" (Trova-yerel pinned). `openVirtualUnread` ile aynı akış;
+    /// yalnız pinnedOnly süzgecini açar.
+    func openVirtualPinned() {
+        section = .search
+        clearSearchFilters()
+        query = ""
+        pinnedOnly = true
         runSearch()
     }
 

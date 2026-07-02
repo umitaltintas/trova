@@ -44,30 +44,50 @@ struct Sidebar: View {
                     .help("Ada/türe göre ara + aç")
             }
 
-            // Akıllı Klasörler: kayıtlı aramalar. Yalnız en az bir kayıt varken görünür; boşken
-            // keşfedilebilirlik zaten Ara sütunundaki SavedSearchButton popover'ında.
+            // Akıllı Klasörler: sabit sanal klasörler (Okunmamışlar/Yıldızlılar) + kayıtlı aramalar.
+            // Section artık HER ZAMAN görünür — sanal klasörler kalıcıdır; kayıtlı aramalar da
+            // altlarına eklenir (boşken ForEach doğal olarak hiçbir satır üretmez).
             // Satırlar `.tag`'siz Button — böylece nav Label'larının List seçimine karışmazlar
-            // (tıklama section'ı .search yapar, "Ara" satırı doğal olarak seçili görünür).
-            if !model.savedSearches.isEmpty {
-                Section("Akıllı Klasörler") {
-                    ForEach(model.savedSearches) { saved in
-                        Button {
+            // (tıklama section'ı .search yapar, "Ara" satırı doğal olarak seçili görünür). Sanal
+            // satırların sağ tık menüsü YOK: silinemezler.
+            Section("Akıllı Klasörler") {
+                Button {
+                    model.openVirtualUnread()
+                } label: {
+                    Label("Okunmamışlar", systemImage: "envelope.badge")
+                }
+                .buttonStyle(.plain)
+                // Canlı okunmamış sayısı; 0 iken yerel `.badge` kendiliğinden gizlenir.
+                .badge(model.unreadTotal)
+                .help("Okunmamış mailleri göster")
+
+                Button {
+                    model.openVirtualPinned()
+                } label: {
+                    Label("Yıldızlılar", systemImage: "star")
+                }
+                .buttonStyle(.plain)
+                // Trova-yerel yıldızlı (pinned) sayısı; 0 iken badge gizlenir.
+                .badge(model.pinnedIDs.count)
+                .help("Trova-yerel yıldızlı mailleri göster")
+
+                ForEach(model.savedSearches) { saved in
+                    Button {
+                        model.runSavedSearch(saved)
+                        model.section = .search
+                    } label: {
+                        Label(saved.name, systemImage: "folder.badge.gearshape")
+                    }
+                    .buttonStyle(.plain)
+                    // Canlı eşleşme sayısı; 0 iken yerel `.badge` kendiliğinden gizlenir.
+                    .badge(model.savedSearchCounts[saved.id] ?? 0)
+                    .help("Kayıtlı aramayı çalıştır: \(saved.name)")
+                    .contextMenu {
+                        Button("Çalıştır") {
                             model.runSavedSearch(saved)
                             model.section = .search
-                        } label: {
-                            Label(saved.name, systemImage: "folder.badge.gearshape")
                         }
-                        .buttonStyle(.plain)
-                        // Canlı eşleşme sayısı; 0 iken yerel `.badge` kendiliğinden gizlenir.
-                        .badge(model.savedSearchCounts[saved.id] ?? 0)
-                        .help("Kayıtlı aramayı çalıştır: \(saved.name)")
-                        .contextMenu {
-                            Button("Çalıştır") {
-                                model.runSavedSearch(saved)
-                                model.section = .search
-                            }
-                            Button("Sil", role: .destructive) { model.deleteSavedSearch(saved.id) }
-                        }
+                        Button("Sil", role: .destructive) { model.deleteSavedSearch(saved.id) }
                     }
                 }
             }

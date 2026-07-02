@@ -70,6 +70,20 @@ final class FlagFilterTests: XCTestCase {
         XCTAssertEqual(hits.map(\.id), ["bayrakli"], "yalnız isFlagged = 1 olanlar")
     }
 
+    /// Sanal "Okunmamışlar" klasörü rozeti bu yolu kullanır: `countMatching(query: nil,
+    /// filter: unreadOnly)` yalnız isRead = 0 olanları sayar; isRead nil olanlar SAYILMAZ.
+    func testUnreadCountExcludesUnknown() throws {
+        let store = try makeStore()
+        let now = Date()
+        try store.upsert([
+            rec("okundu", date: now, isRead: true, isFlagged: false),
+            rec("okunmadi1", date: now.addingTimeInterval(-10), isRead: false, isFlagged: false),
+            rec("okunmadi2", date: now.addingTimeInterval(-15), isRead: false, isFlagged: false),
+            rec("bilinmeyen", date: now.addingTimeInterval(-20), isRead: nil, isFlagged: nil),
+        ])
+        XCTAssertEqual(try store.countMatching(query: nil, filter: SearchFilter(unreadOnly: true)), 2)
+    }
+
     /// FTS aramasında da flag filtreleri uygulanır.
     func testUnreadFilterInSearch() throws {
         let store = try makeStore()
