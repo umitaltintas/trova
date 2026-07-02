@@ -197,6 +197,29 @@ struct SearchColumn: View {
                                 }
                             }
                         }
+                    } else if model.resultSort == .newest {
+                        // Tarih grupları: YALNIZ "En yeni" sıralamasında. Alaka sıralamasında sıra
+                        // motorun verdiği alaka olduğundan tarih başlıkları yanıltıcı olur; "En eski"de
+                        // Daha Eski en üstte kalırdı (ters mantık). Liste zaten yeniden-eskiye sıralı
+                        // olduğundan gruplar (Bugün → Daha Eski → Tarihsiz) doğal olarak sırayla dizilir.
+                        ForEach(DateBucket.grouped(model.displayedResults, date: { $0.date },
+                                                   now: Date(), calendar: .current), id: \.bucket) { group in
+                            Section {
+                                ForEach(group.items) { hit in
+                                    ResultRow(hit: hit, terms: model.highlightTerms)
+                                        .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
+                                        .listRowSeparator(.hidden)
+                                }
+                            } header: {
+                                // "SON ARAMALAR" eyebrow diliyle aynı: 10pt semibold, faint, tracking 0.6,
+                                // büyük harf (tr_TR locale → "TARİHSİZ"/"DAHA ESKİ" doğru diyakritikli).
+                                Text(group.bucket.label.uppercased(with: Locale(identifier: "tr_TR")))
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Theme.faint).tracking(0.6)
+                                    .listRowInsets(EdgeInsets(top: 10, leading: 8, bottom: 4, trailing: 8))
+                                    .listRowSeparator(.hidden)
+                            }
+                        }
                     } else {
                         ForEach(model.displayedResults) { hit in
                             ResultRow(hit: hit, terms: model.highlightTerms)
