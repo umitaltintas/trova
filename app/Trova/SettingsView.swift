@@ -14,8 +14,12 @@ struct SettingsView: View {
     @AppStorage(SettingsKeys.streamAnswers) private var streamAnswers = true
     @AppStorage(SettingsKeys.indexAttachmentContent) private var indexAttachmentContent = false
     @AppStorage("menuBarExtra") private var menuBarExtra = true
+    @AppStorage(SettingsKeys.notifyNewMail) private var notifyNewMail = false
 
     @Environment(AppModel.self) private var model
+
+    // Bildirim izni reddedilmiş mi — açılışta ve toggle değişince async kontrol edilir (.task/onChange).
+    @State private var notificationDenied = false
 
     // Anahtarlar init'te DEĞİL, açıldıktan sonra ana thread dışında yüklenir (aşağıdaki .task).
     // Senkron `Keychain.get` init'ten çağrılsaydı, yeniden imzalama sonrası onay diyaloğu
@@ -33,6 +37,29 @@ struct SettingsView: View {
                 Text("Menü çubuğu eki; yeni mail geldiğinde ikonda rozet gösterir ve ana pencereyi "
                    + "hızlıca öne getirmenizi sağlar.")
                     .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("Yeni mail bildirimi", isOn: $notifyNewMail)
+                    .help("Otomatik senkron açıkken yeni mail geldiğinde macOS bildirimi ve Dock "
+                        + "rozeti gösterir.")
+                    .onChange(of: notifyNewMail) { _, enabled in
+                        // Rozeti anında yeni duruma göre tazele (kapatınca varsa iz kalmaz).
+                        model.syncDockBadge()
+                        if enabled {
+                            Task {
+                                let granted = await MailNotifier.requestAuthorizationIfNeeded()
+                                notificationDenied = !granted
+                            }
+                        } else {
+                            notificationDenied = false
+                        }
+                    }
+                Text("Otomatik senkron açıkken yeni mail geldiğinde macOS bildirimi ve Dock rozeti "
+                   + "gösterir.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if notificationDenied {
+                    Text("Bildirim izni reddedilmiş — Sistem Ayarları > Bildirimler'den açabilirsiniz.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             .tabItem { Label("Genel", systemImage: "gearshape") }
             .padding()
@@ -213,6 +240,10 @@ struct SettingsView: View {
             embedKey = await Keychain.readAsync(KeychainKeys.embedKey)
             llmKey = await Keychain.readAsync(KeychainKeys.llmKey)
             keysLoaded = true
+            // Bildirim açıksa mevcut izin durumunu kontrol et: reddedilmişse toggle altında uyar.
+            if notifyNewMail {
+                notificationDenied = await MailNotifier.authorizationStatus() == .denied
+            }
         }
     }
 

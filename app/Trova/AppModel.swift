@@ -421,6 +421,7 @@ final class AppModel {
         fsEventTimes.removeAll()
         lastReindexFired = nil
         newMailCount = 0
+        syncDockBadge()
     }
 
     /// FSEvents'ten gelen her değişiklik bildirimini kaydeder ve birleştirme (debounce) kontrolünü planlar.
@@ -482,8 +483,22 @@ final class AppModel {
             if result.inserted > 0 {
                 newMailCount += result.inserted
                 refreshVisibleSection()
+                // Opt-in bildirim: bayrak açıksa dalga başına TEK macOS bildirimi. senderPreview,
+                // IndexResult gönderen taşımadığı için nil (basitlik > mükemmellik); body "N yeni mail".
+                if UserDefaults.standard.bool(forKey: SettingsKeys.notifyNewMail) {
+                    MailNotifier.notifyNewMail(count: result.inserted, senderPreview: nil)
+                }
+                syncDockBadge()
             }
         }
+    }
+
+    /// Dock rozetini güncel sayaç + "Yeni mail bildirimi" bayrağına göre tazeler. Bayrak kapalıyken
+    /// rozet HER ZAMAN kaldırılır (kapalıyken hiçbir görsel iz kalmaz; davranış öngörülebilir).
+    /// newMailCount'un değiştiği her yerden ve ayar toggle'ından çağrılır.
+    func syncDockBadge() {
+        let enabled = UserDefaults.standard.bool(forKey: SettingsKeys.notifyNewMail)
+        MailNotifier.updateDockBadge(enabled ? newMailCount : 0)
     }
 
     /// Kullanıcıyı bölmeden açık bölümü sessizce tazeler — yalnız aktif bir iş (soru/arama/indeksleme/
@@ -512,12 +527,15 @@ final class AppModel {
     /// "N yeni mail" rozetine dokununca: sayacı sıfırlar ve açık görünümü tazeler.
     func clearNewMail() {
         newMailCount = 0
+        syncDockBadge()
         refreshVisibleSection()
     }
 
     func onAppear() {
         refreshAccess()
         refreshStatus()
+        // Açılışta newMailCount 0 → rozet nil; bayrak kapalıysa da temiz kalır (tutarlılık).
+        syncDockBadge()
     }
 
     func refreshAccess() {
