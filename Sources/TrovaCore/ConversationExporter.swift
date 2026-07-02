@@ -29,6 +29,62 @@ public enum ConversationExporter {
         return out
     }
 
+    /// Bir kişiyle olan yazışmanın TAMAMINI, konuşmalara (thread) gruplanmış TEK bir Markdown
+    /// belgesine döker. Kişi bölümündeki "Tüm yazışma" dışa aktarımı bunu kullanır; çekirdek olduğu
+    /// için test edilebilir.
+    ///
+    /// Belge yapısı:
+    ///  - `# <kişi adı / adres>` başlığı; hem ad hem adres varsa altında `_<adres>_`.
+    ///  - Özet satırı: `_N mesaj · <ilk tarih> – <son tarih>_` (tek tarihte aralık yerine tek tarih;
+    ///    hiç tarih yoksa yalnız sayı). `truncatedTotal` verilir ve belgedeki mesaj sayısından
+    ///    büyükse, ayrı bir italik notta "toplam M mesajın en yenileri" bilgisi eklenir.
+    ///  - Her konuşma bir `## <konu — boşsa "(konu yok)">` başlığı; altında `_K mesaj_`, ardından o
+    ///    konuşmanın mesajları KRONOLOJİK (en eski üstte) `### <gönderen> — <tarih>` + gövde
+    ///    bloklarıyla, `---` ile ayrılmış olarak.
+    ///
+    /// Sıra: Konuşmalar `ThreadGrouping.group` düzeninde (en son etkinliği en yeni olan üstte —
+    /// uygulama genelindeki "en yeni önce" kuralı) gelir; konuşma İÇİ ise `ConversationTimeline` ile
+    /// en eski üstte okunur (thread yukarıdan aşağı okunur). `N` (özet) belgede gerçekten yer alan
+    /// mesaj sayısıdır — timeline aynı `messageID`'nin kopyalarını eleyebileceğinden başlık ile gövde
+    /// her zaman tutarlıdır. Gövde/IO çağırana aittir; bu modül saf ve deterministiktir.
+    public static func personMarkdown(personName: String?,
+                                      personAddress: String,
+                                      messages: [Message],
+                                      truncatedTotal: Int? = nil,
+                                      calendar: Calendar = .current) -> String {
+        let address = personAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = (personName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = !name.isEmpty ? name : (address.isEmpty ? "(kişi yok)" : address)
+
+        // id → gövde eşlemesi: gruplama SearchHit üzerinde yapılır, gövdeler burada geri bağlanır.
+        var bodyByID: [String: String] = [:]
+        for message in messages where message.body != nil { bodyByID[message.hit.id] = message.body }
+
+        // Konuşmalara grupla (konu normalizasyonu + temsilci konu ThreadGrouping'ten gelir), her
+        // konuşma içini kronolojik akışa diz. `emitted` = belgede gerçekten yer alan mesajlar.
+        let groups = ThreadGrouping.group(messages.map(\.hit))
+        let orderedGroups = groups.map { ConversationTimeline.timeline($0.members) }
+        let emitted = orderedGroups.flatMap { $0 }
+
+        var out = "# \(title)\n\n"
+        if !name.isEmpty, !address.isEmpty { out += "_\(address)_\n\n" }
+        out += metaLine(emitted.map { (hit: $0, body: nil) }, calendar: calendar) + "\n"
+        if let truncatedTotal, truncatedTotal > emitted.count {
+            out += "\n_(Toplam \(truncatedTotal) mesajın en yeni \(emitted.count) tanesi dışa aktarıldı.)_\n"
+        }
+        guard !emitted.isEmpty else { return out }
+
+        let sections = zip(groups, orderedGroups).map { group, ordered -> String in
+            let blocks = ordered.map { hit in
+                block((hit: hit, body: bodyByID[hit.id]), heading: "###", calendar: calendar)
+            }
+            return "## \(group.representativeSubject)\n\n_\(ordered.count) mesaj_\n\n"
+                + blocks.joined(separator: "\n\n---\n\n")
+        }
+        out += "\n" + sections.joined(separator: "\n\n") + "\n"
+        return out
+    }
+
     /// Konuşmayı elektronik tabloya uygun CSV'ye döker. Sütunlar: Tarih, Gönderen, Adres, Konu, Özet.
     /// Kaçış/ayırıcı (virgül, RFC 4180, BOM) uygulamanın diğer CSV'leriyle tutarlı olsun diye
     /// `CsvExporter`'a devredilir. "Özet" mesajın snippet'idir (tam gövde hücreye taşınmaz).
@@ -58,10 +114,11 @@ public enum ConversationExporter {
         return meta + "_"
     }
 
-    /// Tek bir mesajı `## <gönderen> — <tarih>` başlığı + gövde bloğuna çevirir.
-    private static func block(_ message: Message, calendar: Calendar) -> String {
+    /// Tek bir mesajı `<heading> <gönderen> — <tarih>` başlığı + gövde bloğuna çevirir. `heading`
+    /// başlık düzeyini verir: tek konuşma dökümünde `##`, kişi (çok konuşmalı) dökümünde `###`.
+    private static func block(_ message: Message, heading: String = "##", calendar: Calendar) -> String {
         let when = message.hit.date.map { RelativeTime.absolute($0, calendar: calendar) } ?? "tarih yok"
-        return "## \(displayName(message.hit)) — \(when)\n\n\(messageBody(message.body, snippet: message.hit.snippet))"
+        return "\(heading) \(displayName(message.hit)) — \(when)\n\n\(messageBody(message.body, snippet: message.hit.snippet))"
     }
 
     /// Gönderen adı (boşsa adres, o da boşsa `—`). Markdown başlığında tek satırlık kullanılır.

@@ -137,4 +137,100 @@ final class ConversationExporterTests: XCTestCase {
         let csv = ConversationExporter.csv(messages: [], calendar: cal)
         XCTAssertEqual(csv, "\(bom)Tarih,Gönderen,Adres,Konu,Özet\r\n")
     }
+
+    // MARK: - Kişi (toplu, konuşmalara gruplu) Markdown
+
+    func testPersonEmptyStillHasHeaderAndZeroCount() {
+        let md = ConversationExporter.personMarkdown(
+            personName: "Ali Veli", personAddress: "ali@x.com", messages: [], calendar: cal)
+        // Ad varsa başlık ad; adres alt satırda; özet "_0 mesaj_"; hiç konuşma başlığı yok.
+        XCTAssertTrue(md.hasPrefix("# Ali Veli\n\n_ali@x.com_\n"))
+        XCTAssertTrue(md.contains("_0 mesaj_"))
+        XCTAssertFalse(md.contains("## "))
+    }
+
+    func testPersonHeaderFallsBackToAddressWithoutSubtitle() {
+        let md = ConversationExporter.personMarkdown(
+            personName: nil, personAddress: "ali@x.com", messages: [], calendar: cal)
+        XCTAssertTrue(md.hasPrefix("# ali@x.com\n"))
+        // Ad yoksa adres yalnız başlıkta; alt satırda "_adres_" olarak tekrar edilmez.
+        XCTAssertFalse(md.contains("_ali@x.com_"))
+    }
+
+    func testPersonSingleMessageStructure() {
+        let msgs: [ConversationExporter.Message] = [
+            (hit("1", subject: "Fatura", name: "Ali", addr: "ali@x.com", date: date(2024, 3, 5, 14, 30)),
+             "Fatura ektedir."),
+        ]
+        let md = ConversationExporter.personMarkdown(
+            personName: "Ali", personAddress: "ali@x.com", messages: msgs, calendar: cal)
+        XCTAssertTrue(md.contains("_1 mesaj · 5 Mart 2024 14:30_"))   // üst özet
+        XCTAssertTrue(md.contains("## Fatura"))                        // konuşma başlığı
+        XCTAssertTrue(md.contains("### Ali — 5 Mart 2024 14:30"))      // mesaj başlığı (### düzeyi)
+        XCTAssertTrue(md.contains("Fatura ektedir."))
+    }
+
+    func testPersonGroupsMessagesByThreadSubject() {
+        let msgs: [ConversationExporter.Message] = [
+            (hit("1", subject: "Proje planı", name: "Ali", date: date(2024, 3, 1)), "ilk"),
+            (hit("2", subject: "Fatura", name: "Ali", date: date(2024, 3, 3)), "fatura"),
+            (hit("3", subject: "Re: Proje planı", name: "Ali", date: date(2024, 3, 5)), "yanıt"),
+        ]
+        let md = ConversationExporter.personMarkdown(
+            personName: "Ali", personAddress: "ali@x.com", messages: msgs, calendar: cal)
+        // "Re:" öneki aynı gruba düşer; temsilci konu = grubun en YENİ üyesinin orijinal konusu.
+        XCTAssertTrue(md.contains("## Re: Proje planı"))
+        XCTAssertTrue(md.contains("## Fatura"))
+        // Tam iki konuşma başlığı (mesaj "### " başlıkları "\n## " ile eşleşmez).
+        XCTAssertEqual(md.components(separatedBy: "\n## ").count - 1, 2)
+        // Proje grubu içinde kronolojik: "ilk" (1 Mart) "yanıt"tan (5 Mart) önce gelir.
+        guard let iIlk = md.range(of: "ilk"), let iYanit = md.range(of: "yanıt") else {
+            return XCTFail("gövdeler bulunamadı")
+        }
+        XCTAssertTrue(iIlk.lowerBound < iYanit.lowerBound)
+        // Konuşma başına mesaj sayısı satırı.
+        XCTAssertTrue(md.contains("_2 mesaj_"))   // Proje grubu (2 üye)
+        XCTAssertTrue(md.contains("_1 mesaj_"))   // Fatura grubu (1 üye)
+    }
+
+    func testPersonDateRangeSpansAllMessages() {
+        let msgs: [ConversationExporter.Message] = [
+            (hit("1", subject: "A", name: "Ali", date: date(2024, 3, 5, 10, 0)), "x"),
+            (hit("2", subject: "B", name: "Ali", date: date(2024, 3, 7, 12, 0)), "y"),
+        ]
+        let md = ConversationExporter.personMarkdown(
+            personName: "Ali", personAddress: "ali@x.com", messages: msgs, calendar: cal)
+        XCTAssertTrue(md.contains("_2 mesaj · 5 Mart 2024 10:00 – 7 Mart 2024 12:00_"))
+    }
+
+    func testPersonTruncationNoteWhenTotalExceedsExported() {
+        let msgs: [ConversationExporter.Message] = [
+            (hit("1", subject: "Konu", name: "Ali", date: date(2024, 1, 1)), "x"),
+            (hit("2", subject: "Konu", name: "Ali", date: date(2024, 1, 2)), "y"),
+        ]
+        let md = ConversationExporter.personMarkdown(
+            personName: "Ali", personAddress: "ali@x.com", messages: msgs,
+            truncatedTotal: 10, calendar: cal)
+        XCTAssertTrue(md.contains("Toplam 10 mesajın en yeni 2 tanesi dışa aktarıldı."))
+    }
+
+    func testPersonNoTruncationNoteWhenTotalMatches() {
+        let msgs: [ConversationExporter.Message] = [
+            (hit("1", subject: "Konu", name: "Ali", date: date(2024, 1, 1)), "x"),
+        ]
+        let md = ConversationExporter.personMarkdown(
+            personName: "Ali", personAddress: "ali@x.com", messages: msgs,
+            truncatedTotal: 1, calendar: cal)
+        XCTAssertFalse(md.contains("Toplam"))
+    }
+
+    func testPersonBodyFallsBackToSnippet() {
+        let msgs: [ConversationExporter.Message] = [
+            (hit("1", subject: "Konu", name: "Ali", date: date(2024, 1, 1), snippet: "özet-metni"), nil),
+        ]
+        let md = ConversationExporter.personMarkdown(
+            personName: "Ali", personAddress: "ali@x.com", messages: msgs, calendar: cal)
+        XCTAssertTrue(md.contains("### Ali — 1 Ocak 2024 09:00"))
+        XCTAssertTrue(md.contains("özet-metni"))
+    }
 }

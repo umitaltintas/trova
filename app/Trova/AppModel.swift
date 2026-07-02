@@ -382,6 +382,38 @@ final class AppModel {
         CsvExporter.emailList(listItems(similarMails))
     }
 
+    /// Kişi "tüm yazışma" dökümünün üst sınırı: görünümdeki 200-sınırlı listeden BAĞIMSIZ olarak
+    /// bu kadar mesaj çekilir. Gerçek dünyada tek bir kişiyle yazışma neredeyse her zaman bunun
+    /// altındadır; sınır bellek/süreyi bağlarken belgeyi "tüm yazışma" olarak anlamlı kılar. Aşılırsa
+    /// başlığa "en yeni N" notu düşülür.
+    private static let personExportLimit = 1000
+
+    /// Seçili kişiyle olan yazışmanın TAMAMINI konuşmalara gruplanmış tek bir Markdown belgesine döker.
+    /// Görünümdeki 200-sınırlı `personMails` yerine mağazadan bağımsız olarak (en yeni önce) dışa
+    /// aktarım sınırına kadar yeniden çeker; böylece döküm gerçekten "tüm yazışma"dır. Gerçek toplam
+    /// (`personDetail.total`) sınırı aşıyorsa `ConversationExporter` başlığa "en yeni N" notunu koyar.
+    /// Her mesajın gövdesi tek açık mağazadan tek tek okunur (exportConversation deseni); zaten yüklü
+    /// açık mailin gövdesini yeniden okumaz. Okuma başarısızsa o mesaj snippet'e düşer.
+    func exportPersonConversations() -> String {
+        let address = selectedPersonAddress ?? ""
+        let name = people.first { $0.address == address }?.name
+        guard !address.isEmpty else {
+            return ConversationExporter.personMarkdown(personName: name, personAddress: address, messages: [])
+        }
+        let store = try? IndexStore(path: AppPaths.databaseURL)
+        let hits = (store.flatMap { try? $0.fromSender(address, limit: Self.personExportLimit) }) ?? personMails
+        func bodyFor(_ hit: SearchHit) -> String? {
+            if hit.id == selection, let body = selectedBody { return body }
+            return (store.flatMap { try? $0.body(forID: hit.id) }) ?? nil
+        }
+        let messages = hits.map { (hit: $0, body: bodyFor($0)) }
+        let total = personDetail?.total
+        let truncated = (total ?? hits.count) > hits.count ? total : nil
+        return ConversationExporter.personMarkdown(
+            personName: name, personAddress: address,
+            messages: messages, truncatedTotal: truncated)
+    }
+
     /// Seçili konuşmanın (thread) TAMAMINI `ConversationTimeline` sırasıyla Markdown'a döker.
     /// Her mesajın tam gövdesini DB'den okur; seçili mailin zaten yüklü (`selectedBody`) gövdesini
     /// yeniden okumaz. Konuşmalar genelde küçük olduğundan tek tek okuma kabul edilir; okuma

@@ -114,7 +114,9 @@ private struct PersonDetailHeader: View {
                 if !model.personMails.isEmpty {
                     ListExportMenu(markdown: { model.exportPersonMails() },
                                    csv: { model.exportPersonMailsCSV() },
-                                   filename: person?.name ?? address)
+                                   filename: person?.name ?? address,
+                                   fullDocument: { model.exportPersonConversations() },
+                                   fullDocumentFilename: "Yazışma \(person?.name ?? address)")
                 }
                 Button { model.composeNew(to: address) } label: {
                     Label("Yeni e-posta", systemImage: "square.and.pencil")

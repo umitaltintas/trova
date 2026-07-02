@@ -14,10 +14,24 @@ struct ListExportMenu: View {
     let csv: () -> String
     let filename: String
     var labelText = "Dışa aktar"
+    /// Opsiyonel: gövdeleri de içeren, konuşmalara gruplanmış TAM yazışma belgesi (yalnız Markdown).
+    /// Kişi detayında "tüm yazışma" dışa aktarımı için; nil ise ilgili menü öğeleri gizlenir; böylece
+    /// arama/benzer listeleri eskisi gibi yalnız düz liste dışa aktarır.
+    var fullDocument: (() -> String)? = nil
+    var fullDocumentFilename = ""
     @State private var copied = false
 
     var body: some View {
         Menu {
+            if let fullDocument {
+                Button {
+                    Exporter.copy(fullDocument()); copied = true
+                } label: { Label("Tüm yazışma (Markdown) kopyala", systemImage: "text.book.closed") }
+                Button {
+                    Exporter.save(fullDocument(), suggestedName: fullDocumentFilename)
+                } label: { Label("Tüm yazışma (.md) kaydet", systemImage: "square.and.arrow.down") }
+                Divider()
+            }
             Button {
                 Exporter.copy(markdown()); copied = true
             } label: { Label("Markdown kopyala", systemImage: "doc.on.doc") }
