@@ -77,7 +77,14 @@ struct ReadingPane: View {
                             Button { model.openAttachment(named: name) } label: {
                                 Chip(text: name, systemImage: "paperclip")
                             }
-                            .buttonStyle(.plain).help("Eki aç")
+                            .buttonStyle(.plain).help("Eki aç · Sürükleyerek dışa aktar")
+                            // Sürükleyerek Finder'a bırakınca ek dosya olarak dışa aktarılır. Tıkla-aç ve sağ-tık
+                            // menüsü değişmez. Çıkarma başarısızsa boş sağlayıcı — sürükleme sessizce başlamaz.
+                            .onDrag {
+                                guard let url = model.attachmentDragURL(named: name, messageID: hit.id)
+                                else { return NSItemProvider() }
+                                return NSItemProvider(contentsOf: url) ?? NSItemProvider()
+                            }
                             .contextMenu {
                                 Button { model.quickLookAttachment(named: name) } label: {
                                     Label("Hızlı Bak", systemImage: "eye")

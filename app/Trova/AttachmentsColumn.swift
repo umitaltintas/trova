@@ -47,7 +47,8 @@ struct AttachmentsColumn: View {
                             AttachmentRowView(row: row,
                                               open: { model.openAttachmentRow(row) },
                                               quickLook: { model.quickLookAttachment(row: row) },
-                                              openInMail: { model.openRowInMail(row) })
+                                              openInMail: { model.openRowInMail(row) },
+                                              dragURL: { model.attachmentDragURL(row: row) })
                         }
                     }
                     .padding(12)
@@ -123,6 +124,7 @@ private struct AttachmentRowView: View {
     let open: () -> Void
     let quickLook: () -> Void
     let openInMail: () -> Void
+    let dragURL: () -> URL?   // Sürükle-bırakta eki temp'e çıkarıp URL döndürür (hata → nil)
     @State private var hovering = false
 
     var body: some View {
@@ -169,7 +171,13 @@ private struct AttachmentRowView: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help("Eki aç: \(row.fileName)")
+        // Sürükleyerek Finder'a bırakınca ek dosya olarak dışa aktarılır (kopyalanır). Tıklama/hover/sağ-tık
+        // davranışları değişmez. Çıkarma başarısızsa boş sağlayıcı — sürükleme sessizce başlamaz.
+        .onDrag {
+            guard let url = dragURL() else { return NSItemProvider() }
+            return NSItemProvider(contentsOf: url) ?? NSItemProvider()
+        }
+        .help("Eki aç: \(row.fileName) · Sürükleyerek dışa aktar")
         .contextMenu {
             Button { quickLook() } label: { Label("Hızlı Bak", systemImage: "eye") }
             Button { open() } label: { Label("Eki aç", systemImage: "arrow.up.right.square") }

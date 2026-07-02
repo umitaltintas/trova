@@ -781,6 +781,14 @@ final class AppModel {
         }
     }
 
+    /// Sürükle-bırak için ek satırını geçici dosyaya çıkarır ve URL'ini döndürür (hata → nil).
+    /// Bilerek senkron ve ana thread'de: `.onDrag` closure'ı senkron `NSItemProvider` bekler. Tipik ekler
+    /// küçük olduğu için kabul edilir; çok büyük ekte kısa bir gecikme olabilir (bilinen ödünleşim).
+    /// Sürükleme iptalinde banner istemediğimiz için hata durumunda `errorMessage` AYARLANMAZ, sessiz nil döner.
+    func attachmentDragURL(row: AttachmentRow) -> URL? {
+        (try? Self.extractAttachmentToTempFile(fromEMLXPath: row.filePath, named: row.fileName)) ?? nil
+    }
+
     /// Ek satırının sahip mailini native Apple Mail.app'te açar (RFC822 Message-ID'yi bularak).
     func openRowInMail(_ row: AttachmentRow) {
         Task {
@@ -1503,6 +1511,18 @@ final class AppModel {
             }
             quickLookURL = url
         }
+    }
+
+    /// Sürükle-bırak için verilen adlı eki (id'li mailden) geçici dosyaya çıkarır ve URL'ini döndürür (hata → nil).
+    /// Bilerek senkron ve ana thread'de: `.onDrag` closure'ı senkron `NSItemProvider` bekler. IndexStore açılışı +
+    /// çıkarma tipik eklerde hızlıdır; çok büyük ekte kısa bir gecikme olabilir (bilinen ödünleşim).
+    /// Sürükleme iptalinde banner istemediğimiz için hata durumunda `errorMessage` AYARLANMAZ, sessiz nil döner.
+    func attachmentDragURL(named name: String, messageID id: String) -> URL? {
+        (try? {
+            let store = try IndexStore(path: AppPaths.databaseURL)
+            guard let path = try store.filePath(forID: id) else { return nil }
+            return try Self.extractAttachmentToTempFile(fromEMLXPath: path, named: name)
+        }()) ?? nil
     }
 
     /// Seçili maili native Apple Mail.app'te açar (message:// derin-linki). Message-ID yoksa hata gösterir.
