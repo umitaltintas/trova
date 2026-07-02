@@ -214,6 +214,9 @@ final class AppModel {
     private var currentTask: Task<Void, Never>?
     private var cancelFlag: CancellationFlag?
     private var watcher: MailWatcher?
+    // Otomatik günlük brifing zamanlayıcısı: autoDigest açıkken dakikada bir hedef saati kontrol eder.
+    // Timer yerine Task döngüsü — AppModel @MainActor; sleep ana thread'i bloklamaz, cancel() temiz durur.
+    private var digestTimer: Task<Void, Never>?
 
     // FSEvents akışını birleştirme (debounce) durumu — yalnız autoSync açıkken kullanılır.
     private let refreshCoalescer = RefreshCoalescer(window: 2)
@@ -424,6 +427,60 @@ final class AppModel {
         lastReindexFired = nil
         newMailCount = 0
         syncDockBadge()
+    }
+
+    // MARK: - Otomatik günlük brifing (zamanlayıcı)
+
+    /// Otomatik günlük brifing zamanlayıcısını açar/kapatır (Ayarlar toggle'ı + açılışta çağrılır).
+    func setAutoDigest(_ enabled: Bool) {
+        enabled ? startDigestTimer() : stopDigestTimer()
+    }
+
+    /// Dakikada bir hedef saati kontrol eden hafif döngüyü başlatır. İlk kontrol HEMEN yapılır:
+    /// uygulama hedef saatten sonra açıldıysa aynı gün telafi ateşlensin (DailyTrigger.shouldFire).
+    private func startDigestTimer() {
+        guard digestTimer == nil else { return }
+        digestTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.fireAutoDigestIfDue()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+    }
+
+    /// Zamanlayıcıyı durdurur (ayar kapanınca). Bekleyen sleep, cancel ile kısa sürede sonlanır.
+    private func stopDigestTimer() {
+        digestTimer?.cancel()
+        digestTimer = nil
+    }
+
+    /// Hedef saat geldiyse ve koşullar uygunsa günlük brifingi tetikler. Dakikalık zamanlayıcıdan
+    /// çağrılır. Sıra: taze triyaj (bildirim sayısı için) → LLM varsa tam brifing → günü işaretle →
+    /// (izin varsa) bildirim. runDigest zaten sürüyorsa (isDigesting) o gün İŞARETLENMEZ; bir sonraki
+    /// dakika kontrolü tekrar dener.
+    private func fireAutoDigestIfDue() async {
+        let d = UserDefaults.standard
+        guard d.bool(forKey: SettingsKeys.autoDigest) else { return }   // ayar kapandıysa (savunmacı) atla
+        // Varsayılanlar: @AppStorage default'ları UserDefaults'a yazmaz → anahtar yoksa 8:00 uygula.
+        let hour = d.object(forKey: SettingsKeys.autoDigestHour) as? Int ?? 8
+        let minute = d.object(forKey: SettingsKeys.autoDigestMinute) as? Int ?? 0
+        let lastDay = d.object(forKey: SettingsKeys.lastAutoDigestDay) as? Date
+        let now = Date()
+        guard DailyTrigger.shouldFire(now: now, hour: hour, minute: minute,
+                                      lastFiredDay: lastDay, calendar: .current) else { return }
+        // Koşullar: mail erişimi var, başka uzun iş sürmüyor, brifing zaten üretilmiyor.
+        guard hasAccess, !busy, !isDigesting else { return }
+
+        // Triyaj listelerini her durumda (LLM'siz) tazele → bildirim taze needsReply'a dayansın.
+        await refreshTriage()
+        // LLM yapılandırılmışsa tam brifing metnini de üret (arka planda akar; isDigesting'i set eder).
+        if llmConfigured { runDigest() }
+        // Başarıyla tetiklendi → günü işaretle (aynı gün bir daha ateşlenmesin).
+        d.set(now, forKey: SettingsKeys.lastAutoDigestDay)
+        // Bildirim izni verilmişse — "Yeni mail bildirimi" ayarından BAĞIMSIZ ("trova.digest" kimliği).
+        if await MailNotifier.canNotify() {
+            MailNotifier.notifyDigestReady(pendingCount: pendingReplyCount)
+        }
     }
 
     /// FSEvents'ten gelen her değişiklik bildirimini kaydeder ve birleştirme (debounce) kontrolünü planlar.
@@ -852,19 +909,23 @@ final class AppModel {
     /// gelinen (dismissed) öğeleri süzer. Gizlenen öğe sayısı `dismissedHiddenCount`'a yazılır;
     /// re-surface: bir öğenin tarihi gizleme anından sonraysa (konuya yeni yanıt) yeniden görünür.
     func loadTriage() {
-        Task {
-            guard let lists = await background({ () -> (needs: [SearchHit], waiting: [SearchHit], dismissed: [String: Date]) in
-                let store = try IndexStore(path: AppPaths.databaseURL)
-                return (try store.needsReply(limit: 50),
-                        try store.waitingOnReply(minDays: 3, limit: 50),
-                        try store.dismissedDigest())
-            }) else { return }
-            let needs = filterDismissed(lists.needs, dismissed: lists.dismissed)
-            let waiting = filterDismissed(lists.waiting, dismissed: lists.dismissed)
-            dismissedHiddenCount = (lists.needs.count - needs.count) + (lists.waiting.count - waiting.count)
-            needsReply = needs
-            waitingOn = waiting
-        }
+        Task { await refreshTriage() }
+    }
+
+    /// `loadTriage`'ın beklenebilir çekirdeği: triyaj listelerini tazeler ve döner. Otomatik brifing
+    /// tetiği bunu `await` ederek bildirim öncesi TAZE `needsReply` sayısına ulaşır (LLM gerektirmez).
+    private func refreshTriage() async {
+        guard let lists = await background({ () -> (needs: [SearchHit], waiting: [SearchHit], dismissed: [String: Date]) in
+            let store = try IndexStore(path: AppPaths.databaseURL)
+            return (try store.needsReply(limit: 50),
+                    try store.waitingOnReply(minDays: 3, limit: 50),
+                    try store.dismissedDigest())
+        }) else { return }
+        let needs = filterDismissed(lists.needs, dismissed: lists.dismissed)
+        let waiting = filterDismissed(lists.waiting, dismissed: lists.dismissed)
+        dismissedHiddenCount = (lists.needs.count - needs.count) + (lists.waiting.count - waiting.count)
+        needsReply = needs
+        waitingOn = waiting
     }
 
     /// Bir triyaj öğesini görmezden gelir: şimdiyle dismiss eder, listeden hemen çıkarır (optimistik)

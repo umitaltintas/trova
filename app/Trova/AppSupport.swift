@@ -67,6 +67,10 @@ enum SettingsKeys {
     static let indexAttachmentContent = "indexAttachmentContent"  // Ek İÇERİĞİNİ indeksle/ara (opt-in, varsayılan KAPALI)
     static let notifyNewMail = "notifyNewMail"    // Yeni mail geldiğinde macOS bildirimi + Dock rozeti (opt-in, varsayılan KAPALI)
     static let recentSearches = "trova.recentSearches"  // otomatik arama geçmişi ([String], en yeni başta)
+    static let autoDigest = "autoDigest"          // Belirlenen saatte otomatik günlük brifing (opt-in, varsayılan KAPALI)
+    static let autoDigestHour = "autoDigestHour"  // Otomatik brifing hedef saati (0–23, varsayılan 8)
+    static let autoDigestMinute = "autoDigestMinute"  // Otomatik brifing hedef dakikası (0–59, varsayılan 0)
+    static let lastAutoDigestDay = "lastAutoDigestDay"  // Son otomatik brifing günü (Date?; aynı gün tekrar ateşlenmesin)
 }
 
 /// Otomatik arama geçmişini UserDefaults'a okuyup yazan küçük yardımcı.

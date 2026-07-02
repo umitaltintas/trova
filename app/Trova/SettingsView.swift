@@ -15,6 +15,9 @@ struct SettingsView: View {
     @AppStorage(SettingsKeys.indexAttachmentContent) private var indexAttachmentContent = false
     @AppStorage("menuBarExtra") private var menuBarExtra = true
     @AppStorage(SettingsKeys.notifyNewMail) private var notifyNewMail = false
+    @AppStorage(SettingsKeys.autoDigest) private var autoDigest = false
+    @AppStorage(SettingsKeys.autoDigestHour) private var autoDigestHour = 8
+    @AppStorage(SettingsKeys.autoDigestMinute) private var autoDigestMinute = 0
 
     @Environment(AppModel.self) private var model
 
@@ -27,6 +30,22 @@ struct SettingsView: View {
     @State private var embedKey = ""
     @State private var llmKey = ""
     @State private var keysLoaded = false
+
+    /// DatePicker(.hourAndMinute) için Date↔(saat,dakika) köprüsü: yalnız saat/dakika bileşenleri
+    /// okunur/yazılır (gün önemsiz). Yazarken @AppStorage Int'leri güncellenir; zamanlayıcı bunları okur.
+    private var digestTime: Binding<Date> {
+        Binding(
+            get: {
+                var comps = DateComponents(); comps.hour = autoDigestHour; comps.minute = autoDigestMinute
+                return Calendar.current.date(from: comps) ?? Date()
+            },
+            set: { newValue in
+                let comps = Calendar.current.dateComponents([.hour, .minute], from: newValue)
+                autoDigestHour = comps.hour ?? 8
+                autoDigestMinute = comps.minute ?? 0
+            }
+        )
+    }
 
     var body: some View {
         TabView {
@@ -60,6 +79,28 @@ struct SettingsView: View {
                     Text("Bildirim izni reddedilmiş — Sistem Ayarları > Bildirimler'den açabilirsiniz.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+
+                Toggle("Günlük brifingi otomatik oluştur", isOn: $autoDigest)
+                    .help("Belirlenen saatte Bugün brifingini oluşturur ve bildirim gösterir "
+                        + "(uygulama açıkken).")
+                    .onChange(of: autoDigest) { _, enabled in
+                        model.setAutoDigest(enabled)
+                        if enabled {
+                            // Toggle açılınca bildirim izni iste (Iter 63 kalıbı).
+                            Task {
+                                let granted = await MailNotifier.requestAuthorizationIfNeeded()
+                                notificationDenied = !granted
+                            }
+                        }
+                    }
+                if autoDigest {
+                    DatePicker("Brifing saati", selection: digestTime,
+                               displayedComponents: .hourAndMinute)
+                        .datePickerStyle(.compact)
+                }
+                Text("Belirlenen saatte Bugün brifingini oluşturur ve bildirim gösterir "
+                   + "(uygulama açıkken).")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .tabItem { Label("Genel", systemImage: "gearshape") }
             .padding()

@@ -9,6 +9,10 @@ enum MailNotifier {
     /// Sabit bildirim kimliği: her yeni dalga öncekini DEĞİŞTİRSİN (replace), bildirimler yığılmasın.
     private static let notificationID = "trova.newmail"
 
+    /// Günlük brifing bildirimi için ayrı, sabit kimlik: yeni-mail bildiriminden BAĞIMSIZ; her günkü
+    /// brifing öncekini değiştirir (yığılmaz). "Yeni mail bildirimi" ayarından ayrı yönetilir.
+    private static let digestID = "trova.digest"
+
     /// Bildirim iznini yalnız gerekiyorsa ister. Mevcut durum `.notDetermined` ise `.alert`+`.badge`
     /// izni ister ve kullanıcının kararını döndürür; zaten verilmişse `true`, reddedilmişse SESSİZCE
     /// `false` döner (hata banner'ı YOK). Ayarlar toggle'ı AÇILINCA çağrılır.
@@ -45,6 +49,29 @@ enum MailNotifier {
             content.body = "\(count) yeni mail"
         }
         let request = UNNotificationRequest(identifier: notificationID, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    /// Bildirim gösterilebilir mi — istemeden (prompt YOK) yalnız mevcut izni okur. Otomatik brifing
+    /// tetiği bunu kontrol eder: izin verilmemişse sessizce bildirim atlanır (hedef saatte rahatsız
+    /// edici izin diyaloğu ÇIKMAZ; izin, ayardaki toggle açılınca istenir).
+    static func canNotify() async -> Bool {
+        switch await authorizationStatus() {
+        case .authorized, .provisional, .ephemeral: return true
+        default: return false
+        }
+    }
+
+    /// Günlük brifing hazır olduğunda tek bildirim gönderir (otomatik brifing zamanlayıcısından).
+    /// Body, yanıt bekleyen mail sayısını (`pendingCount` = süzülmüş needsReply) yansıtır; 0 ise
+    /// "Her şey güncel görünüyor". Sabit `digestID` sayesinde her günkü brifing öncekini değiştirir.
+    static func notifyDigestReady(pendingCount: Int) {
+        let content = UNMutableNotificationContent()
+        content.title = "Günlük brifing hazır"
+        content.body = pendingCount > 0
+            ? "\(pendingCount) mail yanıt bekliyor"
+            : "Her şey güncel görünüyor"
+        let request = UNNotificationRequest(identifier: digestID, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
 

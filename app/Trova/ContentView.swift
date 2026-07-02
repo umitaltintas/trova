@@ -6,6 +6,7 @@ struct ContentView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("autoSync") private var autoSync = false
+    @AppStorage(SettingsKeys.autoDigest) private var autoDigest = false
     @State private var showPalette = false
 
     var body: some View {
@@ -63,7 +64,7 @@ struct ContentView: View {
         // yapıyordu (kenar çubuğu bomboş kalıyordu). Bayat "NSSplitView Subview Frames …"
         // autosave'inin pencere kurulmadan ÖNCE silinmesi olan asıl açılış-anı koruması ise
         // `TrovaApp.init()` içinde DURUYOR ve tek başına yeterli.
-        .task { model.onAppear(); if autoSync { model.setAutoSync(true) } }
+        .task { model.onAppear(); if autoSync { model.setAutoSync(true) }; if autoDigest { model.setAutoDigest(true) } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.refreshAccess(); model.refreshStatus() }
         }
