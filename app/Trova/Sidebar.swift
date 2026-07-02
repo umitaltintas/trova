@@ -43,10 +43,40 @@ struct Sidebar: View {
                 Label("Ekler", systemImage: "paperclip").tag(AppModel.Section.attachments)
                     .help("Ada/türe göre ara + aç")
             }
+
+            // Akıllı Klasörler: kayıtlı aramalar. Yalnız en az bir kayıt varken görünür; boşken
+            // keşfedilebilirlik zaten Ara sütunundaki SavedSearchButton popover'ında.
+            // Satırlar `.tag`'siz Button — böylece nav Label'larının List seçimine karışmazlar
+            // (tıklama section'ı .search yapar, "Ara" satırı doğal olarak seçili görünür).
+            if !model.savedSearches.isEmpty {
+                Section("Akıllı Klasörler") {
+                    ForEach(model.savedSearches) { saved in
+                        Button {
+                            model.runSavedSearch(saved)
+                            model.section = .search
+                        } label: {
+                            Label(saved.name, systemImage: "folder.badge.gearshape")
+                        }
+                        .buttonStyle(.plain)
+                        // Canlı eşleşme sayısı; 0 iken yerel `.badge` kendiliğinden gizlenir.
+                        .badge(model.savedSearchCounts[saved.id] ?? 0)
+                        .help("Kayıtlı aramayı çalıştır: \(saved.name)")
+                        .contextMenu {
+                            Button("Çalıştır") {
+                                model.runSavedSearch(saved)
+                                model.section = .search
+                            }
+                            Button("Sil", role: .destructive) { model.deleteSavedSearch(saved.id) }
+                        }
+                    }
+                }
+            }
         }
         .listStyle(.sidebar)
         // Alt durum bloğu kaydırmanın DIŞINDA kalır → kısa pencerede bile hep görünür.
         .safeAreaInset(edge: .bottom, spacing: 0) { SidebarFooter(autoSync: $autoSync) }
+        // Kenar çubuğu görününce kayıtlı aramaları + canlı sayaçlarını mevcut yenileyiciyle tazele.
+        .task { model.loadSavedSearches() }
     }
 }
 
