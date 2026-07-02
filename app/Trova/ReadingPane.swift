@@ -377,7 +377,13 @@ private struct ConversationRow: View {
     let message: SearchHit
     let height: CGFloat
 
-    private var isCurrent: Bool { message.id == model.selection }
+    // Kimlik eşleşmesi yeterli değil: seçili mailin kopyası timeline dedup'ında elenmişse ayakta
+    // kalan satırın kimliği seçime uymaz; o durumda normalize messageID üzerinden de eşleşilir.
+    private var isCurrent: Bool {
+        ConversationTimeline.isCurrentRow(
+            rowID: message.id, rowMessageID: message.messageID,
+            selectionID: model.selection, selectionMessageID: model.selectedMessageID)
+    }
 
     /// Erişilebilirlik etiketi: "<gönderen>, <mutlak tarih>".
     private var a11yLabel: String {

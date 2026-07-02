@@ -129,4 +129,46 @@ final class ConversationTimelineTests: XCTestCase {
         // Sıra: eski(100), orta(300), dup-yeni(500), tarihsiz(nil)
         XCTAssertEqual(result.map(\.id), ["eski", "orta", "dup-yeni", "tarihsiz"])
     }
+
+    // MARK: - Aktif satır eşleşmesi (isCurrentRow)
+
+    /// Kimlik eşleşiyorsa aktif kabul edilir (temel durum).
+    func testIsCurrentRowMatchesByID() {
+        XCTAssertTrue(ConversationTimeline.isCurrentRow(
+            rowID: "a", rowMessageID: nil, selectionID: "a", selectionMessageID: nil))
+    }
+
+    /// Farklı kimlik + eşleşen messageID yoksa aktif değil.
+    func testIsCurrentRowNoMatchDifferentID() {
+        XCTAssertFalse(ConversationTimeline.isCurrentRow(
+            rowID: "a", rowMessageID: nil, selectionID: "b", selectionMessageID: nil))
+    }
+
+    /// Seçili mailin kopyası dedup'ta elenmiş: kimlikler farklı ama messageID (boşluk kırpılınca)
+    /// aynı → aktif kabul edilir (bu düzeltmenin özü).
+    func testIsCurrentRowMatchesByMessageIDWhenIDsDiffer() {
+        XCTAssertTrue(ConversationTimeline.isCurrentRow(
+            rowID: "kalan", rowMessageID: " <m1@x> ",
+            selectionID: "elenen", selectionMessageID: "<m1@x>"))
+    }
+
+    /// Boş/nil messageID anahtarsızdır → yalnız kimlik eşleşmesi geçerlidir (yanlış eşleşme olmaz).
+    func testIsCurrentRowEmptyOrNilMessageIDNoMatch() {
+        XCTAssertFalse(ConversationTimeline.isCurrentRow(
+            rowID: "a", rowMessageID: "   ", selectionID: "b", selectionMessageID: ""))
+        XCTAssertFalse(ConversationTimeline.isCurrentRow(
+            rowID: "a", rowMessageID: nil, selectionID: "b", selectionMessageID: nil))
+    }
+
+    /// Kimlik eşleşmesi, messageID farklı olsa bile kazanır.
+    func testIsCurrentRowIDMatchWinsEvenWithDifferentMessageID() {
+        XCTAssertTrue(ConversationTimeline.isCurrentRow(
+            rowID: "a", rowMessageID: "<r@x>", selectionID: "a", selectionMessageID: "<s@x>"))
+    }
+
+    /// Seçim yoksa (nil kimlik + nil messageID) hiçbir satır aktif değildir.
+    func testIsCurrentRowNilSelectionNoMatch() {
+        XCTAssertFalse(ConversationTimeline.isCurrentRow(
+            rowID: "a", rowMessageID: "<m@x>", selectionID: nil, selectionMessageID: nil))
+    }
 }

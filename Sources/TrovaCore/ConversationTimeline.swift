@@ -42,6 +42,26 @@ public enum ConversationTimeline {
             .map(\.hit)
     }
 
+    /// Bir konuşma satırının "aktif/seçili mail" olup olmadığını belirler.
+    ///
+    /// Önce satır kimliği (`rowID`) seçili kimlikle (`selectionID`) karşılaştırılır. Eşleşmezse
+    /// RFC822 `messageID` üzerinden de eşleşme kabul edilir: `timeline` aynı mantıksal mailin
+    /// kopyalarını `messageID`'ye göre tekilleştirdiğinden, seçili mailin kopyası elenmiş olabilir;
+    /// o durumda ayakta kalan satırın kimliği seçili kimliğe uymaz ama `messageID`'leri aynıdır. Boş
+    /// ya da nil `messageID` eşleşme SAĞLAMAZ (anahtarsız kabul edilir; dedup ile aynı kural).
+    /// Normalizasyon dedup ile birebir aynıdır (yalnız baş/son boşluk kırpılır).
+    public static func isCurrentRow(rowID: String, rowMessageID: String?,
+                                    selectionID: String?, selectionMessageID: String?) -> Bool {
+        if let selectionID, rowID == selectionID { return true }
+        let row = normalizedMessageID(rowMessageID)
+        return !row.isEmpty && row == normalizedMessageID(selectionMessageID)
+    }
+
+    /// RFC822 `messageID` normalizasyonu: yalnız baş/son boşluk kırpar (dedup anahtarıyla aynı kural).
+    private static func normalizedMessageID(_ id: String?) -> String {
+        id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
     /// "En eski önce" karşılaştırıcısı: daha küçük tarih önce gelir; `nil` her zaman sona gider;
     /// eşit tarihte (veya ikisi de `nil`) küçük `offset` (girdi sırası) önce gelir → kararlı.
     private static func olderFirst(_ a: (offset: Int, date: Date?),
