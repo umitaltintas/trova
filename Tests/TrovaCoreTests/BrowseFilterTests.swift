@@ -28,6 +28,22 @@ final class BrowseFilterTests: XCTestCase {
         XCTAssertEqual(hits.map(\.id), ["1"])
     }
 
+    func testBrowseByFromContainsTurkishCaseInsensitive() throws {
+        // Türk harfli gönderen adları (İsmail/Şeyma) küçük harfle yazılınca da eşleşmeli.
+        // ASCII adlarda (Ali) davranış değişmez — tr_lower yalnız katlamayı genişletir.
+        let store = try makeStore()
+        let now = Date()
+        try store.upsert([
+            msg("1", from: "İsmail Yılmaz", addr: "ismail@x.com", attachments: nil, date: now),
+            msg("2", from: "Şeyma Kaya", addr: "seyma@x.com", attachments: nil, date: now.addingTimeInterval(-60)),
+            msg("3", from: "Ali Veli", addr: "ali@x.com", attachments: nil, date: now.addingTimeInterval(-120)),
+        ])
+        XCTAssertEqual(try store.browse(SearchFilter(fromContains: "ismail"), limit: 10).map(\.id), ["1"])
+        XCTAssertEqual(try store.browse(SearchFilter(fromContains: "şeyma"), limit: 10).map(\.id), ["2"])
+        // ASCII regresyon koruması: küçük harfli "ali" hâlâ "Ali Veli"yi bulur.
+        XCTAssertEqual(try store.browse(SearchFilter(fromContains: "ali"), limit: 10).map(\.id), ["3"])
+    }
+
     func testBrowseByHasAttachment() throws {
         let store = try makeStore()
         let now = Date()

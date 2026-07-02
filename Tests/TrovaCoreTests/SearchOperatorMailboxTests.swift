@@ -52,6 +52,23 @@ final class SearchOperatorMailboxTests: XCTestCase {
         XCTAssertEqual(hits.map(\.id), ["1"])
     }
 
+    func testMailboxTurkishCaseInsensitive() throws {
+        // Türk harfli kutu adları (Önemli/Çöp/İstenmeyen) küçük harfle yazılınca da eşleşmeli.
+        // SQLite yerleşik LIKE yalnız ASCII katlar → tr_lower olmadan bu vakalar KAÇARDI.
+        let store = try makeStore()
+        let now = Date()
+        try store.upsert([
+            msg("1", mailbox: "Önemli", body: "fatura", date: now),
+            msg("2", mailbox: "Çöp", body: "fatura", date: now.addingTimeInterval(-60)),
+            msg("3", mailbox: "İstenmeyen", body: "fatura", date: now.addingTimeInterval(-120)),
+        ])
+        XCTAssertEqual(try store.browse(SearchFilter(mailboxContains: "önemli"), limit: 10).map(\.id), ["1"])
+        XCTAssertEqual(try store.browse(SearchFilter(mailboxContains: "çöp"), limit: 10).map(\.id), ["2"])
+        XCTAssertEqual(try store.browse(SearchFilter(mailboxContains: "istenmeyen"), limit: 10).map(\.id), ["3"])
+        // Büyük harfli sorgu da (kullanıcı nasıl yazarsa) aynı kutuyu bulmalı.
+        XCTAssertEqual(try store.browse(SearchFilter(mailboxContains: "ÖNEMLİ"), limit: 10).map(\.id), ["1"])
+    }
+
     func testSearchWithMailboxFilterNarrowsResults() throws {
         let store = try makeStore()
         let now = Date()

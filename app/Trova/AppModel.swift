@@ -595,6 +595,20 @@ final class AppModel {
         refreshStatus()
         // Açılışta newMailCount 0 → rozet nil; bayrak kapalıysa da temiz kalır (tutarlılık).
         syncDockBadge()
+        cleanAttachmentTempIfNeeded()
+    }
+
+    // Eki aç / Hızlı Bak, ekleri "trova-ekler" geçici klasörüne çıkarır ama hiç temizlemezdi;
+    // uzun süre açık kalan (menü çubuğu) oturumda bu klasör sınırsız birikirdi. Süreç başına
+    // BİR KEZ, ilk pencere açılışında (henüz hiçbir ek açılmamışken → kullanımdaki dosya YOK)
+    // klasörü siliyoruz. Sonraki çıkarmalar klasörü yeniden kurar (createDirectory).
+    private var didCleanAttachmentTemp = false
+    private func cleanAttachmentTempIfNeeded() {
+        guard !didCleanAttachmentTemp else { return }
+        didCleanAttachmentTemp = true
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("trova-ekler", isDirectory: true)
+        Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: dir) }
     }
 
     func refreshAccess() {

@@ -269,8 +269,29 @@ public final class IndexStore: Sendable {
     public init(path: URL) throws {
         try FileManager.default.createDirectory(
             at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
-        dbQueue = try DatabaseQueue(path: path.path)
+        // Türkçe-farkındalıklı küçük harf katlayıcısını (`tr_lower`) her bağlantıya kaydet: mailbox/
+        // gönderen LIKE süzgeçleri Türk harfli adları (Önemli, Çöp, İsmail) küçük harfle de yakalasın.
+        var config = Configuration()
+        config.prepareDatabase { db in db.add(function: Self.trLowerFunction) }
+        dbQueue = try DatabaseQueue(path: path.path, configuration: config)
         try Self.migrator.migrate(dbQueue)
+    }
+
+    /// Arama/eşleştirme için Türkçe-farkındalıklı küçük harf katlaması. SQLite'ın yerleşik LIKE'ı
+    /// yalnız ASCII katlar (A–Z) → "Önemli"/"Çöp"/"İsmail" gibi Türk harfli adlar küçük harfle
+    /// yazılınca eşleşmezdi. Bu fonksiyon `%q%` LIKE süzgeçlerinde iki tarafı da katlar.
+    /// Not: tr_TR locale'i KULLANILMAZ (o, I→ı yapıp "INBOX"~"inbox"i bozardı); Unicode invariant
+    /// küçük harf + İ'nin ürettiği birleşik noktanın (U+0307) temizliği kullanılır → hem "INBOX"~
+    /// "inbox" hem "İsmail"~"ismail" çalışır.
+    static func caseFold(_ s: String) -> String {
+        s.lowercased().replacingOccurrences(of: "\u{0307}", with: "")
+    }
+
+    /// `caseFold`'u SQLite'a bağlayan saf (deterministik) skaler fonksiyon. NULL girdi → NULL döner
+    /// (mevcut `NULL LIKE …` davranışıyla aynı: eşleşme yok).
+    private static let trLowerFunction = DatabaseFunction("tr_lower", argumentCount: 1, pure: true) { values in
+        guard let s = String.fromDatabaseValue(values[0]) else { return nil }
+        return caseFold(s)
     }
 
     private static var migrator: DatabaseMigrator {
@@ -1268,14 +1289,16 @@ public final class IndexStore: Sendable {
         if let since = filter.since { parts.append("m.date >= ?"); args.append(since) }
         if let until = filter.until { parts.append("m.date <= ?"); args.append(until) }
         if let from = filter.fromContains, !from.isEmpty {
-            parts.append("(m.fromName LIKE ? OR m.fromAddress LIKE ?)")
+            // Türkçe-farkındalıklı: iki tarafı da tr_lower ile katla (Ömer/Şeyma/İsmail gibi Türk
+            // harfli adlar küçük harfle yazılınca da eşleşsin). ASCII adlarda davranış değişmez.
+            parts.append("(tr_lower(m.fromName) LIKE tr_lower(?) OR tr_lower(m.fromAddress) LIKE tr_lower(?))")
             args.append("%\(from)%"); args.append("%\(from)%")
         }
-        // Posta kutusu daraltması (kutu:/mailbox: operatörü): parça eşleşme, LIKE ile büyük/küçük
-        // harf duyarsız (ASCII katlaması). Mailbox adı yol bileşenlerinden türer (örn. "INBOX",
-        // "Arşiv", "[Gmail]/All Mail"); parça arama iç içe kutu adlarını da yakalar.
+        // Posta kutusu daraltması (kutu:/mailbox: operatörü): parça eşleşme, tr_lower ile Türkçe-
+        // farkındalıklı büyük/küçük harf duyarsız. Mailbox adı yol bileşenlerinden türer (örn.
+        // "INBOX", "Önemli", "Arşiv", "[Gmail]/All Mail"); parça arama iç içe kutu adlarını da yakalar.
         if let mailbox = filter.mailboxContains, !mailbox.isEmpty {
-            parts.append("m.mailbox LIKE ?")
+            parts.append("tr_lower(m.mailbox) LIKE tr_lower(?)")
             args.append("%\(mailbox)%")
         }
         if filter.hasAttachment {
