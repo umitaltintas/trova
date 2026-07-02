@@ -138,14 +138,16 @@ public enum HealthCheck {
                 ? "OpenRouter anahtarı ayarlı."
                 : "\"Sor\", özet ve \"Bugün\" brifingi için Ayarlar'dan bir OpenRouter anahtarı ekleyin."))
 
-        // 6) Embedding sağlayıcısı — yalnızca yapılandırılmışsa not düş (yerel zayıf uyarısı).
+        // 6) Embedding sağlayıcısı — yalnızca yapılandırılmışsa not düş.
+        //    Yerel model (NLContextualEmbedding) cihaz-üstü ve anahtarsızdır; yine de
+        //    mean-pool sıralaması bulut modellerinden zayıf olduğundan uyarı (warn) kalır.
         if input.embedderConfigured {
             items.append(HealthItem(
                 id: "embedder",
                 title: "Embedding sağlayıcısı",
                 status: input.usesLocalEmbedder ? .warn : .ok,
                 detail: input.usesLocalEmbedder
-                    ? "Yerel embedding sıralamada zayıf olabilir; daha iyi sonuç için Ayarlar'dan bulut sağlayıcı seçin."
+                    ? "Yerel model (cihaz-üstü, anahtarsız) etkin. Sıralama kalitesi için Ayarlar'dan bulut sağlayıcı seçebilirsiniz."
                     : "Bulut embedding sağlayıcısı ayarlı."))
         }
 

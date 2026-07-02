@@ -13,8 +13,9 @@ Apple Mail'e bağladığınız tüm hesaplar (iCloud, Gmail, Exchange, IMAP…) 
 `~/Library/Mail/V*/*.emlx` altında yerele senkronlandığı için **hiçbir hesaba yeniden
 bağlanmaya gerek yoktur** — tek gereksinim Full Disk Access iznidir.
 
-**Gizlilik:** Her şey varsayılan olarak yerelde çalışır. Embedding'ler yerelde
-üretilebilir; yalnızca bir bulut sağlayıcı yapılandırırsanız özet/sıralama için kısa
+**Gizlilik:** Her şey varsayılan olarak yerelde çalışır. Embedding'ler cihaz-üstü Apple
+modeliyle (çok dilli, **anahtar gerekmez**; model varlıkları bir kez indirilir) yerelde
+üretilir; yalnızca bir bulut sağlayıcı yapılandırırsanız özet/sıralama için kısa
 parçalar API'ye gider. Mail HTML'i gösterilmeden önce temizlenir — uzak görseller
 (izleme pikselleri), script ve olay işleyicileri kaldırılır. **Yanıtla / Yeni e-posta**
 yalnızca oluşturma penceresini açar (otomatik **göndermez**); yıldızlama Trova-yereldir
@@ -113,9 +114,11 @@ open Trova.xcodeproj           # Xcode'da ⌘R (otomatik imza)
 
 ### Embedding sağlayıcıları
 
-1. **Yerel `NLContextualEmbedding`** (offline, ücretsiz) — varsayılan. Bir token kodlayıcısıdır;
-   mean-pool sıralama kalitesi **ölçülen şekliyle zayıftır**. `semantic` tek başına güvenilmez;
-   `hybrid`'de FTS taşır, reranking/PRF telafi eder.
+1. **Yerel `NLContextualEmbedding`** (cihaz-üstü, anahtarsız, çok dilli) — varsayılan. Apple'ın
+   yerleşik transformer kodlayıcısıdır; Türkçe+İngilizce karışık maillerde çalışır ve hiçbir veri
+   dışarı çıkmaz. Model varlıkları **bir kez** indirilir (Ayarlar › Embedding'den; ilk gömmede de
+   istenir). Token vektörleri mean-pool + L2 normalize edilir; sıralama kalitesi bulut modellerinden
+   düşüktür, bu yüzden `semantic` tek başına güvenilmez — `hybrid`'de FTS taşır, reranking/PRF telafi eder.
 2. **Bulut API (OpenRouter / OpenAI / Voyage)** — yüksek kaliteli çok dilli modeller, **önerilen**.
    OpenRouter OpenAI-uyumlu `/embeddings` sunduğundan tek `OPENROUTER_API_KEY` hem gömme hem
    `ask`/`agent` (LLM) için kullanılabilir. (Uygulamada Ayarlar'dan, CLI'da ortam değişkenleriyle.)

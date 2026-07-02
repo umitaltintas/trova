@@ -98,6 +98,10 @@ final class AppModel {
     var usesLocalEmbedder = false
     var statusLoaded = false        // ilk durum yüklemesi bitti mi (kurulum kapısı yanıp sönmesin)
 
+    // Yerel gömme modeli (NLContextualEmbedding) varlık durumu — cihaz-üstü, bir kerelik indirme.
+    var localEmbedAssetsReady = false
+    var downloadingLocalEmbedAssets = false
+
     // Bağlantı testi (Ayarlar → AI): yapılandırılmış LLM/embedding sağlayıcılarına canlı istek sonuçları.
     var connectionResults: [ConnectionResult] = []
     var isTestingConnection = false
@@ -636,8 +640,29 @@ final class AppModel {
             switch provider {
             case "openai", "voyage": embedderConfigured = !embedKey.isEmpty
             case "openrouter":       embedderConfigured = !(embedKey.isEmpty && llmKey.isEmpty)
-            default:                 embedderConfigured = true   // yerel her zaman kullanılabilir
+            default:
+                // Yerel model: varlıklar (bir kerelik indirme) hazırsa gerçekten kullanılabilir.
+                let ready = await Task.detached { LocalEmbeddingProvider.assetsAvailable() }.value
+                localEmbedAssetsReady = ready
+                embedderConfigured = ready
             }
+        }
+    }
+
+    /// Yerel gömme modeli varlıklarını (NLContextualEmbedding, cihaz-üstü, anahtarsız, bir kerelik)
+    /// indirir. Ayarlar › Embedding'deki düğmeden tetiklenir. Bittiğinde sağlayıcı bayraklarını tazeler.
+    func downloadLocalEmbedAssets() {
+        guard !downloadingLocalEmbedAssets else { return }
+        downloadingLocalEmbedAssets = true; errorMessage = nil
+        Task {
+            defer { downloadingLocalEmbedAssets = false }
+            do {
+                try await LocalEmbeddingProvider.downloadAssets()
+                localEmbedAssetsReady = true
+            } catch {
+                errorMessage = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            }
+            refreshProviders()
         }
     }
 

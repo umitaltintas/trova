@@ -131,11 +131,30 @@ struct SettingsView: View {
                     TextField("Model (opsiyonel)", text: $embedModel)
                     TextField("Boyut (opsiyonel)", text: $embedDim)
                 }
+                if embedProvider == "local" {
+                    Text("Cihaz-üstü Apple modeli (NLContextualEmbedding) — çok dilli, anahtar gerekmez, "
+                       + "hiçbir veri dışarı çıkmaz. Model varlıkları bir kez indirilir.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        if model.downloadingLocalEmbedAssets {
+                            ProgressView().controlSize(.small)
+                            Text("Yerel model indiriliyor…").font(.caption).foregroundStyle(.secondary)
+                        } else if model.localEmbedAssetsReady {
+                            Label("Yerel model hazır", systemImage: "checkmark.circle.fill")
+                                .font(.caption).foregroundStyle(.green)
+                        } else {
+                            Button("Yerel model varlıklarını indir") { model.downloadLocalEmbedAssets() }
+                                .controlSize(.small)
+                            Text("(indirilmemiş)").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 if embedProvider != "local" {
                     Text("Sağlayıcı/boyut değişince mailleri yeniden gömün (Gömme düğmesi).")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            .onChange(of: embedProvider) { _, _ in model.refreshProviders() }
             .tabItem { Label("Embedding", systemImage: "wand.and.stars") }
             .padding()
 

@@ -32,11 +32,17 @@ func makeEmbedder(announce: Bool = true) -> EmbeddingProvider? {
         if announce { FileHandle.standardError.write(Data("Embedding: API (boyut=\(api.dimension))\n".utf8)) }
         return api
     }
-    if let local = try? LocalEmbeddingProvider() {
+    do {
+        let local = try LocalEmbeddingProvider()
         if announce { FileHandle.standardError.write(Data("Embedding: yerel NLContextualEmbedding (boyut=\(local.dimension))\n".utf8)) }
         return local
+    } catch {
+        if announce {
+            let hint = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            FileHandle.standardError.write(Data("⚠︎ Yerel gömme: \(hint)\n".utf8))
+        }
+        return nil
     }
-    return nil
 }
 
 extension Array {

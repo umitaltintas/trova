@@ -16,11 +16,30 @@ public extension EmbeddingProvider {
     }
 }
 
-/// Apple'ın yerleşik çok dilli `NLContextualEmbedding` modeliyle (512-d, offline,
-/// Türkçe destekli) gömme üretir. Token vektörleri ortalanıp L2 normalize edilir;
-/// böylece nokta çarpımı doğrudan kosinüs benzerliğini verir.
+/// Apple'ın yerleşik çok dilli `NLContextualEmbedding` modeliyle (offline, anahtarsız)
+/// gömme üretir. `.turkish` dili, hem Türkçe hem İngilizceyi kapsayan Latin-yazımlı çok
+/// dilli modele çözülür (mailler karışık dilli); model kimliğini/boyutunu değiştirmemek
+/// için bilerek dil-bazlı kurucu korunur (bkz. VectorMath / message_vector boyut filtresi).
+/// Token vektörleri ortalanıp (mean-pool) L2 normalize edilir; böylece nokta çarpımı
+/// doğrudan kosinüs benzerliğini verir. Boyut çalışma zamanında modelden alınır.
 public final class LocalEmbeddingProvider: EmbeddingProvider, @unchecked Sendable {
-    public enum Failure: Error { case modelUnavailable }
+    public enum Failure: Error, LocalizedError {
+        case modelUnavailable   // bu macOS/dil için model hiç kurulamıyor
+        case assetsUnavailable  // model var ama cihaz-üstü varlıklar (bir kerelik indirme) yok
+        case downloadFailed(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .modelUnavailable:
+                return "Yerel gömme modeli bu sistemde kullanılamıyor."
+            case .assetsUnavailable:
+                return "Yerel gömme modeli varlıkları indirilmemiş. Ayarlar › Embedding'den "
+                     + "\"Yerel model varlıklarını indir\" ile bir kerelik indirin."
+            case let .downloadFailed(message):
+                return "Yerel gömme modeli varlıkları indirilemedi: \(message)"
+            }
+        }
+    }
 
     private let embedding: NLContextualEmbedding
     private let language: NLLanguage
@@ -28,14 +47,44 @@ public final class LocalEmbeddingProvider: EmbeddingProvider, @unchecked Sendabl
     public let dimension: Int
 
     public init(language: NLLanguage = .turkish) throws {
-        guard let model = NLContextualEmbedding(language: language),
-              model.hasAvailableAssets else {
+        guard let model = NLContextualEmbedding(language: language) else {
             throw Failure.modelUnavailable
+        }
+        guard model.hasAvailableAssets else {
+            throw Failure.assetsUnavailable
         }
         try model.load()
         self.embedding = model
         self.language = language
         self.dimension = model.dimension
+    }
+
+    /// Yerel model varlıkları (bir kerelik indirme) cihazda hazır mı — ağ/indirme YAPMAZ.
+    /// UI'da "indir" düğmesini göstermek ve teşhis için kullanılır.
+    public static func assetsAvailable(language: NLLanguage = .turkish) -> Bool {
+        NLContextualEmbedding(language: language)?.hasAvailableAssets ?? false
+    }
+
+    /// Yerel model varlıklarını (yoksa) indirir. Bir kere, küçük, anahtarsız. Zaten varsa
+    /// hemen döner. `requestAssets()` async'tir ve tamamlanana dek bekler; çevrimdışıysa/
+    /// varlık yoksa/hata olursa anlaşılır bir `Failure` atar.
+    public static func downloadAssets(language: NLLanguage = .turkish) async throws {
+        guard let model = NLContextualEmbedding(language: language) else {
+            throw Failure.modelUnavailable
+        }
+        if model.hasAvailableAssets { return }
+        do {
+            switch try await model.requestAssets() {
+            case .available:    return
+            case .notAvailable: throw Failure.downloadFailed("bu cihaz için varlık yok")
+            case .error:        throw Failure.downloadFailed("indirme hatası")
+            @unknown default:   throw Failure.downloadFailed("beklenmeyen durum")
+            }
+        } catch let failure as Failure {
+            throw failure
+        } catch {
+            throw Failure.downloadFailed(error.localizedDescription)
+        }
     }
 
     public func embed(_ text: String) throws -> [Float] {
