@@ -32,10 +32,11 @@ public struct HealthInput: Sendable, Equatable {
     public var llmConfigured: Bool       // OpenRouter anahtarı / ortam ayarlı mı
     public var embedderConfigured: Bool  // kullanılabilir bir embedding sağlayıcısı var mı
     public var usesLocalEmbedder: Bool   // sağlayıcı yerel (ölçülen zayıf sıralama) mı
+    public var autoEmbedEnabled: Bool    // "Yeni mailleri otomatik göm" ayarı açık mı
 
     public init(mailStoreReadable: Bool, mailStoreLocated: Bool, indexedCount: Int,
                 vectorCount: Int, llmConfigured: Bool, embedderConfigured: Bool,
-                usesLocalEmbedder: Bool) {
+                usesLocalEmbedder: Bool, autoEmbedEnabled: Bool = true) {
         self.mailStoreReadable = mailStoreReadable
         self.mailStoreLocated = mailStoreLocated
         self.indexedCount = indexedCount
@@ -43,6 +44,7 @@ public struct HealthInput: Sendable, Equatable {
         self.llmConfigured = llmConfigured
         self.embedderConfigured = embedderConfigured
         self.usesLocalEmbedder = usesLocalEmbedder
+        self.autoEmbedEnabled = autoEmbedEnabled
     }
 }
 
@@ -113,15 +115,24 @@ public enum HealthCheck {
             ? Double(input.vectorCount) / Double(input.indexedCount) : 0
         let vecStatus: HealthStatus
         let vecDetail: String
+        // Otomatik gömme yalnız bir sağlayıcı kuruluysa VE ayar açıksa kendiliğinden tamamlar; iki
+        // koşul da sağlanıyorsa kullanıcıya elle "Gömme" değil, arka planda tamamlanacağını söyleriz.
+        let autoWillFinish = input.autoEmbedEnabled && input.embedderConfigured
         if input.indexedCount == 0 {
             vecStatus = .warn
-            vecDetail = "İndeks oluştuktan sonra anlamsal arama için \"Gömme\" çalıştırın."
+            vecDetail = autoWillFinish
+                ? "Otomatik gömme açık — indeksleme sonrası gömme arka planda kendiliğinden yapılır."
+                : "İndeks oluştuktan sonra anlamsal arama için \"Gömme\" çalıştırın."
         } else if input.vectorCount == 0 {
             vecStatus = .warn
-            vecDetail = "Anlamsal arama kapalı. \"Gömme\" ile vektörleri oluşturun."
+            vecDetail = autoWillFinish
+                ? "Anlamsal arama henüz kapalı. Otomatik gömme açık; mailler arka planda kendiliğinden gömülür."
+                : "Anlamsal arama kapalı. \"Gömme\" ile vektörleri oluşturun."
         } else if coverage < 0.9 {
             vecStatus = .warn
-            vecDetail = "Maillerin %\(Int(coverage * 100))'i gömülü. Kalanı için \"Gömme\" çalıştırın."
+            vecDetail = autoWillFinish
+                ? "Maillerin %\(Int(coverage * 100))'i gömülü. Kalanı otomatik gömme ile arka planda kendiliğinden tamamlanır."
+                : "Maillerin %\(Int(coverage * 100))'i gömülü. Kalanı için \"Gömme\" çalıştırın."
         } else {
             vecStatus = .ok
             vecDetail = "Anlamsal arama hazır (%\(Int(coverage * 100)))."

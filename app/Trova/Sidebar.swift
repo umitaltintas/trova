@@ -167,6 +167,17 @@ struct SidebarFooter: View {
                     Text("\(model.vectorCount.formatted()) vektör · %\(coveragePercent) gömme")
                         .font(.mono(10)).foregroundStyle(Theme.muted).lineLimit(1)
                 }
+
+                // Otomatik gömme sürüyorsa (busy'den ayrı, UI'ı kilitlemez) tek satırlık sessiz ibare.
+                if model.autoEmbedding && !model.busy {
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini)
+                        Text(model.autoEmbedRemaining > 0
+                             ? "Otomatik gömülüyor · \(model.autoEmbedRemaining.formatted()) kaldı"
+                             : "Otomatik gömülüyor…")
+                            .font(.system(size: 10)).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                }
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
         }

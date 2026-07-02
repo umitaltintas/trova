@@ -126,6 +126,12 @@ open Trova.xcodeproj           # Xcode'da ⌘R (otomatik imza)
    OpenRouter OpenAI-uyumlu `/embeddings` sunduğundan tek `OPENROUTER_API_KEY` hem gömme hem
    `ask`/`agent` (LLM) için kullanılabilir. (Uygulamada Ayarlar'dan, CLI'da ortam değişkenleriyle.)
 
+**Otomatik gömme (uygulama, varsayılan açık):** İndeksleme (elle "İndeksle" veya otomatik senkron)
+bittikten sonra vektörü olmayan mailler arka planda küçük partiler halinde otomatik gömülür; böylece
+anlamsal arama kapsamı elle "Gömme"ye basmadan kendiliğinden %100'e yaklaşır. UI'ı kilitlemez ve
+düşük öncelikte çalışır. Ayarlar › Embedding'deki **"Yeni mailleri otomatik göm"** ile kapatılabilir
+(kapalıyken gömme yalnız elle yapılır). Uygun bir sağlayıcı yoksa sessizce beklenir.
+
 ## CLI (`trova`)
 
 ```sh

@@ -1395,6 +1395,19 @@ extension IndexStore {
         }
     }
 
+    /// Henüz gömülmemiş (vektörü olmayan) mail sayısı — metin çekmeden yalnız sayar.
+    /// Otomatik gömme dalgası, bu turda iş var mı / kaç kaldı kararını buradan verir.
+    public func messagesMissingVectorsCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*)
+                FROM message m
+                LEFT JOIN message_vector v ON v.id = m.id
+                WHERE v.id IS NULL
+                """) ?? 0
+        }
+    }
+
     /// Tüm vektörleri siler. Embedding sağlayıcısı/boyutu değişince yeniden üretmek için.
     public func clearVectors() throws {
         try dbQueue.write { db in try db.execute(sql: "DELETE FROM message_vector") }

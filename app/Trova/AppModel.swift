@@ -115,7 +115,16 @@ final class AppModel {
             vectorCount: vectorCount,
             llmConfigured: llmConfigured,
             embedderConfigured: embedderConfigured,
-            usesLocalEmbedder: usesLocalEmbedder))
+            usesLocalEmbedder: usesLocalEmbedder,
+            autoEmbedEnabled: autoEmbedEnabled))
+    }
+
+    /// "Yeni mailleri otomatik göm" ayarı — varsayılan AÇIK. @AppStorage varsayılanı UserDefaults'a
+    /// YAZMADIĞINDAN anahtar hiç yoksa açık kabul edilir (mevcut `object(forKey:) as? Int ?? 8`
+    /// kalıbının bool karşılığı). Kullanıcı Ayarlar'dan kapatabilir.
+    var autoEmbedEnabled: Bool {
+        let d = UserDefaults.standard
+        return d.object(forKey: SettingsKeys.autoEmbed) == nil ? true : d.bool(forKey: SettingsKeys.autoEmbed)
     }
 
     /// İlk-çalıştırma kurulum kapısı gösterilmeli mi.
@@ -220,6 +229,16 @@ final class AppModel {
     var jobTotal = 0
     private var currentTask: Task<Void, Never>?
     private var cancelFlag: CancellationFlag?
+
+    // Otomatik gömme (auto-embed): indeksleme sonrası eksik vektörleri arka planda gömme durumu.
+    // `busy`den AYRI tutulur → UI'ı kilitlemez (kullanıcı arama/soru yapmaya devam edebilir);
+    // footer'da yalnız küçük bir ilerleme ibaresi gösterilir. Manuel yazma işleriyle karşılıklı
+    // dışlanır (bkz. stopAutoEmbed / startAutoEmbedIfNeeded).
+    var autoEmbedding = false            // arka planda otomatik gömme sürüyor mu
+    var autoEmbedRemaining = 0           // bu dalgada kalan (yaklaşık) mail sayısı — footer ibaresi için
+    private var autoEmbedTask: Task<Void, Never>?
+    private var autoEmbedCancel: CancellationFlag?
+
     private var watcher: MailWatcher?
     // Otomatik günlük brifing zamanlayıcısı: autoDigest açıkken dakikada bir hedef saati kontrol eder.
     // Timer yerine Task döngüsü — AppModel @MainActor; sleep ana thread'i bloklamaz, cancel() temiz durur.
@@ -552,6 +571,7 @@ final class AppModel {
         // Opt-in ek içeriği ayarı: yeni gelen maillerde de (AÇIKsa) ek metni indekslenir.
         let indexAttContent = UserDefaults.standard.bool(forKey: SettingsKeys.indexAttachmentContent)
         currentTask = Task {
+            await stopAutoEmbed()   // süren otomatik gömme varsa önce tam durdur (aynı DB'ye yazarlar)
             let result = await background { () -> IndexResult in
                 guard let root = MailStore.locate() else { throw AppError.noMailStore }
                 let store = try IndexStore(path: AppPaths.databaseURL)
@@ -571,6 +591,8 @@ final class AppModel {
             // Meşguliyet bayraklarını ÖNCE sıfırla ki görünür tazeleme (busy kontrolü) çalışabilsin.
             busy = false; currentTask = nil; cancelFlag = nil
             refreshStatus()
+            // Yeni indekslenen (eksik-vektörlü) mailleri arka planda otomatik göm (ayar açıksa).
+            startAutoEmbedIfNeeded()
             guard let result else { return }
             progress = result.processed > 0
                 ? "\(result.inserted) yeni · \(result.duplicates) kopya · \(result.skipped) atlandı · \(result.failed) hata"
@@ -635,6 +657,9 @@ final class AppModel {
         // Açılışta newMailCount 0 → rozet nil; bayrak kapalıysa da temiz kalır (tutarlılık).
         syncDockBadge()
         cleanAttachmentTempIfNeeded()
+        // Açılışta birikmiş (önceden indekslenmiş ama gömülmemiş) mailleri arka planda gömmeye başla:
+        // yeni-mail olayı beklemeden kapsam kendiliğinden %100'e yaklaşsın (ayar açıksa, sağlayıcı varsa).
+        startAutoEmbedIfNeeded()
     }
 
     // Eki aç / Hızlı Bak, ekleri "trova-ekler" geçici klasörüne çıkarır ama hiç temizlemezdi;
@@ -1152,8 +1177,10 @@ final class AppModel {
     /// Ajanın kalıcı hafızasını temizler ve sayacı yeniler.
     func clearMemory() {
         Task {
+            await stopAutoEmbed()   // aynı DB'ye yazma — süren otomatik gömmeyle çakışmasın
             _ = await background { try IndexStore(path: AppPaths.databaseURL).clearMemories() }
             refreshStatus()
+            startAutoEmbedIfNeeded()   // durdurulmuş bir backlog kaldıysa sürdür
         }
     }
 
@@ -1164,7 +1191,9 @@ final class AppModel {
         // Opt-in: ek içeriği indeksleme ayarı (varsayılan KAPALI). KAPALIYKEN ek metni çıkarılmaz.
         let indexAttContent = UserDefaults.standard.bool(forKey: SettingsKeys.indexAttachmentContent)
         currentTask = Task {
-            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus() }
+            await stopAutoEmbed()   // süren otomatik gömme varsa önce tam durdur (aynı DB'ye yazarlar)
+            // Bitişte yeni indekslenen (eksik-vektörlü) mailleri arka planda otomatik göm.
+            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus(); startAutoEmbedIfNeeded() }
             let result = await background { () -> IndexResult in
                 guard let root = MailStore.locate() else { throw AppError.noMailStore }
                 let store = try IndexStore(path: AppPaths.databaseURL)
@@ -1192,7 +1221,9 @@ final class AppModel {
         busy = true; errorMessage = nil; jobProcessed = 0; jobTotal = 0
         progress = "Yinelenenler taranıyor…"
         currentTask = Task {
-            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus() }
+            await stopAutoEmbed()   // süren otomatik gömme varsa önce tam durdur (dedup vektör de siler)
+            // Bitişte otomatik gömmeyi sürdür: dedup eksik-vektör tablosunu değiştirmiş olabilir.
+            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus(); startAutoEmbedIfNeeded() }
             let removed = await background { () -> Int in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 return try store.dedupeExisting { processed, total in
@@ -1216,7 +1247,9 @@ final class AppModel {
         busy = true; errorMessage = nil; jobProcessed = 0; jobTotal = 0; progress = "Ek içeriği taranıyor…"
         let flag = CancellationFlag(); cancelFlag = flag
         currentTask = Task {
-            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus() }
+            await stopAutoEmbed()   // süren otomatik gömme varsa önce tam durdur (aynı DB'ye yazarlar)
+            // Bitişte otomatik gömmeyi sürdür (bu geçişle durdurulmuş bir backlog kalmış olabilir).
+            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus(); startAutoEmbedIfNeeded() }
             let count = await background { () -> Int in
                 let store = try IndexStore(path: AppPaths.databaseURL)
                 return try Indexer.indexAttachmentContentPass(store: store, cancel: flag) { processed, total in
@@ -1237,8 +1270,10 @@ final class AppModel {
     func clearAttachmentContent() {
         guard !busy else { return }
         Task {
+            await stopAutoEmbed()   // aynı DB'ye yazma — süren otomatik gömmeyle çakışmasın
             _ = await background { try IndexStore(path: AppPaths.databaseURL).clearAttachmentContent() }
             refreshStatus()
+            startAutoEmbedIfNeeded()   // durdurulmuş bir backlog kaldıysa sürdür
         }
     }
 
@@ -1247,7 +1282,10 @@ final class AppModel {
         busy = true; errorMessage = nil; jobProcessed = 0; jobTotal = 0; progress = "Hazırlanıyor…"
         let flag = CancellationFlag(); cancelFlag = flag
         currentTask = Task {
-            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus() }
+            await stopAutoEmbed()   // süren otomatik gömme varsa önce tam durdur (aynı vektörleri yazarlar)
+            // Bitişte otomatik gömmeyi yeniden değerlendir: manuel gömme yarıda iptal edildiyse (busy
+            // biter) kalan eksikleri arka planda tamamlar; hiç eksik kalmadıysa kendiliğinden atlar.
+            defer { busy = false; currentTask = nil; cancelFlag = nil; refreshStatus(); startAutoEmbedIfNeeded() }
             guard let embedder = Providers.embedder() else {
                 errorMessage = AppError.noEmbedder.description; return
             }
@@ -1261,6 +1299,109 @@ final class AppModel {
                 }
             }
             if let count { progress = count == 0 ? "Tüm mailler zaten gömülü" : "Bitti · \(count) işlendi" }
+        }
+    }
+
+    // MARK: - Otomatik gömme (auto-embed)
+
+    /// Bir otomatik gömme dalgasında işlenecek üst sınır. Neden bölünmüş parti + art arda dalga:
+    /// tek hamlede tüm eksikleri gömmek ilk açılışta saatlerce kesintisiz CPU/ısı üretirdi. Bunun
+    /// yerine her partiyi sınırlıyoruz (iptale duyarlı kalır, footer'daki vektör sayısı partiler
+    /// arasında canlı artar) ve eksik tükenene dek — partiler arasında kısa nefes vererek —
+    /// art arda süreriz. Böylece kapsam elle müdahale olmadan %100'e yaklaşır ama sürekli tam gaz
+    /// CPU yakılmaz; iş `.utility` önceliğinde ve arka planda koşar.
+    static let autoEmbedBatchLimit = 400
+
+    /// İndeksleme (otomatik senkron dalgası VEYA elle "İndeksle"/"Gömme") bittikten sonra eksik
+    /// vektörleri arka planda gömmeyi başlatır. `busy`den AYRIDIR → UI'ı kilitlemez. Idempotent:
+    /// erişim yoksa, ayar kapalıysa, manuel iş sürüyorsa (`busy`) veya zaten çalışıyorsa hiçbir şey
+    /// yapmaz. Sağlayıcı kurulamıyorsa (yerel varlık yok VE bulut anahtarı yok) SESSİZCE durur —
+    /// hata şeridi göstermez (sağlık kartı durumu zaten anlatır).
+    func startAutoEmbedIfNeeded() {
+        guard hasAccess, autoEmbedEnabled, !busy, !autoEmbedding else { return }
+        let flag = CancellationFlag()
+        autoEmbedCancel = flag
+        autoEmbedding = true
+        autoEmbedTask = Task {
+            defer {
+                autoEmbedding = false; autoEmbedRemaining = 0
+                autoEmbedTask = nil; autoEmbedCancel = nil
+            }
+            // Önce ucuz kontrol: hiç eksik yoksa (kapsam zaten tam) ağır sağlayıcı kurulumuna girme.
+            let missing = await Task.detached(priority: .utility) {
+                try? IndexStore(path: AppPaths.databaseURL).messagesMissingVectorsCount()
+            }.value
+            guard let missing, missing > 0 else { return }
+            // Sağlayıcıyı bir KEZ, ana thread DIŞINDA kur: LocalEmbeddingProvider.init model.load()
+            // ile ağırdır ve Keychain okuması ana thread'i kilitleyebilir. Kurulamazsa sessizce çık.
+            guard let embedder = await Task.detached(priority: .utility, operation: {
+                Providers.embedder()
+            }).value else { return }
+            await runAutoEmbedWaves(embedder: embedder, cancel: flag)
+        }
+    }
+
+    /// Eksik vektörleri partiler halinde gömer. Her turda eksik sayısını okur, `AutoEmbedPolicy` ile
+    /// bu partide kaç gömüleceğini hesaplar (0 → durur), o kadarını gömer, footer'daki vektör sayısını
+    /// tazeler ve bir sonraki partiye geçmeden kısa nefes verir (ısı/enerji). Manuel iş başlarsa
+    /// (`busy`), ayar kapatılırsa veya iptal edilirse temiz durur.
+    private func runAutoEmbedWaves(embedder: EmbeddingProvider, cancel: CancellationFlag) async {
+        // İş `background`'ı DEĞİL, `.utility` öncelikli ve hataları YUTAN ayrı bir detached task'ı
+        // kullanır: (1) düşük öncelik ısı/enerji açısından naziktir, (2) otomatik gömme hataları
+        // errorMessage şeridine YAZILMAZ (sessizce atlanır — sağlık kartı durumu zaten anlatır).
+        while !Task.isCancelled, !cancel.isCancelled, !busy, autoEmbedEnabled {
+            let missing = await Task.detached(priority: .utility) {
+                try? IndexStore(path: AppPaths.databaseURL).messagesMissingVectorsCount()
+            }.value
+            guard let missing else { break }
+            let size = AutoEmbedPolicy.batchSize(providerAvailable: true, enabled: autoEmbedEnabled,
+                                                 missingCount: missing, batchLimit: Self.autoEmbedBatchLimit)
+            guard size > 0 else { break }
+            autoEmbedRemaining = missing
+
+            let done = await Task.detached(priority: .utility) { () -> Int? in
+                do {
+                    let store = try IndexStore(path: AppPaths.databaseURL)
+                    return try EmbeddingRunner.run(store: store, embedder: embedder, limit: size,
+                                                   cancel: cancel) { processed, _ in
+                        Task { @MainActor in self.autoEmbedRemaining = Swift.max(0, missing - processed) }
+                    }
+                } catch {
+                    return nil   // sessiz: sağlayıcı/DB hatası şerit göstermez, döngü durur
+                }
+            }.value
+            refreshVectorCount()   // footer'daki vektör sayısı/kapsam canlı artsın (hafif — tam refreshStatus değil)
+            guard let done, done > 0 else { break }   // hata ya da ilerleme yoksa dur (sonsuz döngü olmasın)
+            try? await Task.sleep(for: .seconds(1))    // partiler arası nefes (iptal bu sırada da yakalanır)
+        }
+        // Doğal bitişte (iptal/busy değil) tam durumu tazele → kapsam kartı + sağlık güncellensin.
+        // Manuel iş nedeniyle durduysak, onun kendi refreshStatus'una bırakırız (çift tazeleme yok).
+        if !cancel.isCancelled && !busy { refreshStatus() } else { refreshVectorCount() }
+    }
+
+    /// Süren otomatik gömmeyi iptal eder (ayar Ayarlar'dan kapatılınca UI'dan çağrılır). Ateşle-unut.
+    func cancelAutoEmbed() {
+        autoEmbedCancel?.cancel()
+        autoEmbedTask?.cancel()
+    }
+
+    /// Süren otomatik gömmeyi iptal eder VE tam durmasını bekler. Manuel yazma işleri (İndeksle/Gömme/
+    /// dedup/ek geçişi) başlamadan önce çağrılır: DatabaseQueue tek bağlantılıdır, aynı DB'ye eşzamanlı
+    /// ikinci yazar çakışır → önce oto-gömmenin bittiğinden emin oluruz.
+    private func stopAutoEmbed() async {
+        autoEmbedCancel?.cancel()
+        autoEmbedTask?.cancel()
+        await autoEmbedTask?.value
+    }
+
+    /// Yalnız vektör sayısını (footer kapsam ibaresi için) hafifçe tazeler — refreshStatus'un tüm
+    /// yükünü (triyaj/insights/kişiler/…) her partide tekrarlamamak için.
+    private func refreshVectorCount() {
+        Task {
+            let count = await Task.detached(priority: .utility) {
+                try? IndexStore(path: AppPaths.databaseURL).vectorCount()   // sessiz — hata şeridi yok
+            }.value
+            if let count { vectorCount = count }
         }
     }
 

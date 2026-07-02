@@ -29,10 +29,13 @@ public enum EmbeddingRunner {
         store: IndexStore,
         embedder: EmbeddingProvider,
         messageBatch: Int = 48,
+        limit: Int? = nil,
         cancel: CancellationFlag? = nil,
         progress: ((_ processed: Int, _ total: Int) -> Void)? = nil
     ) throws -> Int {
-        let pending = try store.messagesMissingVectors()
+        // `limit` verilirse yalnız o kadar eksik mail çekilir (otomatik gömme dalgasının parti sınırı);
+        // nil ise (manuel Gömme) tüm eksikler gömülür.
+        let pending = try store.messagesMissingVectors(limit: limit)
         let total = pending.count
         var processed = 0
 

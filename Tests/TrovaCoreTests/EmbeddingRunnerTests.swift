@@ -52,4 +52,34 @@ final class EmbeddingRunnerTests: XCTestCase {
         // İkinci kez çalıştırınca eksik kalmadığından 0 işler.
         XCTAssertEqual(try EmbeddingRunner.run(store: store, embedder: MockEmbedder()), 0)
     }
+
+    /// `limit` yalnız o kadar eksik maili gömer (otomatik gömme dalgasının parti sınırı); kalanlar
+    /// bir sonraki çağrıda gömülür. Böylece art arda bounded dalgalarla kapsam %100'e ulaşır.
+    func testRunRespectsLimitAndResumesRemaining() throws {
+        let store = try store()
+        try store.upsert((0..<5).map { msg("m\($0)", "gövde \($0)") })
+
+        // İlk dalga: en çok 2 göm.
+        XCTAssertEqual(try EmbeddingRunner.run(store: store, embedder: MockEmbedder(), limit: 2), 2)
+        XCTAssertEqual(try store.vectorCount(), 2)
+        XCTAssertEqual(try store.messagesMissingVectorsCount(), 3)
+
+        // İkinci dalga: kalan 3'ün 2'si.
+        XCTAssertEqual(try EmbeddingRunner.run(store: store, embedder: MockEmbedder(), limit: 2), 2)
+        XCTAssertEqual(try store.messagesMissingVectorsCount(), 1)
+
+        // Üçüncü dalga: sınır kalan sayının üstünde → yalnız kalan 1 gömülür, sonra 0.
+        XCTAssertEqual(try EmbeddingRunner.run(store: store, embedder: MockEmbedder(), limit: 400), 1)
+        XCTAssertEqual(try store.messagesMissingVectorsCount(), 0)
+        XCTAssertEqual(try store.vectorCount(), 5)
+    }
+
+    /// `messagesMissingVectorsCount`, gömülü mailleri düşerek yalnız eksikleri sayar.
+    func testMissingVectorsCount() throws {
+        let store = try store()
+        try store.upsert([msg("a", "bir"), msg("b", "iki"), msg("c", "üç")])
+        XCTAssertEqual(try store.messagesMissingVectorsCount(), 3)
+        _ = try EmbeddingRunner.run(store: store, embedder: MockEmbedder(), limit: 1)
+        XCTAssertEqual(try store.messagesMissingVectorsCount(), 2)
+    }
 }

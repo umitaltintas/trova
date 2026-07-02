@@ -66,6 +66,7 @@ enum SettingsKeys {
     static let streamAnswers = "streamAnswers"    // Sor yanıtını canlı (token token) akıt (varsayılan AÇIK)
     static let indexAttachmentContent = "indexAttachmentContent"  // Ek İÇERİĞİNİ indeksle/ara (opt-in, varsayılan KAPALI)
     static let notifyNewMail = "notifyNewMail"    // Yeni mail geldiğinde macOS bildirimi + Dock rozeti (opt-in, varsayılan KAPALI)
+    static let autoEmbed = "autoEmbed"            // İndeksleme sonrası eksik vektörleri arka planda otomatik göm (varsayılan AÇIK)
     static let recentSearches = "trova.recentSearches"  // otomatik arama geçmişi ([String], en yeni başta)
     static let autoDigest = "autoDigest"          // Belirlenen saatte otomatik günlük brifing (opt-in, varsayılan KAPALI)
     static let autoDigestHour = "autoDigestHour"  // Otomatik brifing hedef saati (0–23, varsayılan 8)

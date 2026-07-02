@@ -15,6 +15,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKeys.indexAttachmentContent) private var indexAttachmentContent = false
     @AppStorage("menuBarExtra") private var menuBarExtra = true
     @AppStorage(SettingsKeys.notifyNewMail) private var notifyNewMail = false
+    @AppStorage(SettingsKeys.autoEmbed) private var autoEmbed = true
     @AppStorage(SettingsKeys.autoDigest) private var autoDigest = false
     @AppStorage(SettingsKeys.autoDigestHour) private var autoDigestHour = 8
     @AppStorage(SettingsKeys.autoDigestMinute) private var autoDigestMinute = 0
@@ -163,6 +164,20 @@ struct SettingsView: View {
                     Text("Sağlayıcı/boyut değişince mailleri yeniden gömün (Gömme düğmesi).")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+
+                Divider()
+
+                Toggle("Yeni mailleri otomatik göm", isOn: $autoEmbed)
+                    .help("İndeksleme sonrası vektörü olmayan mailleri arka planda otomatik gömer; "
+                        + "anlamsal arama kapsamı elle \"Gömme\"ye gerek kalmadan kendiliğinden tamamlanır.")
+                    .onChange(of: autoEmbed) { _, enabled in
+                        // Açılınca birikmiş eksikleri hemen gömmeye başla; kapanınca süreni durdur.
+                        if enabled { model.startAutoEmbedIfNeeded() } else { model.cancelAutoEmbed() }
+                    }
+                Text("İndekslenen yeni mailler arka planda küçük partiler halinde gömülür (UI'ı "
+                   + "kilitlemez, dalga başına en çok \(AppModel.autoEmbedBatchLimit) mail). Kapatırsanız "
+                   + "gömme yalnız elle \"Gömme\" düğmesiyle yapılır. Sağlayıcı yoksa sessizce beklenir.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .onChange(of: embedProvider) { _, _ in model.refreshProviders() }
             .tabItem { Label("Embedding", systemImage: "wand.and.stars") }
