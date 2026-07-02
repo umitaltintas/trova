@@ -1,4 +1,5 @@
 import SwiftUI
+import QuickLook   // .quickLookPreview(_:) modifier'ı için
 import TrovaCore
 
 // MARK: - Okuma paneli
@@ -13,6 +14,10 @@ struct ReadingPane: View {
             .sheet(isPresented: $model.showSimilarSheet) {
                 SimilarMailsSheet().environment(model)
             }
+            // Ek çiplerinin sağ tık "Hızlı Bak" önizlemesi bu panoya bağlıdır. Bölümler karşılıklı
+            // dışlar (ContentView `else if`) → okuma paneli ile Ekler sütunu aynı anda görünmez; her
+            // yüzey kendi binding'ini tetikleyicisine yakın taşır ve çakışmaz.
+            .quickLookPreview($model.quickLookURL)
     }
 
     /// Gövde vurgusu yalnız arama bölümünde ve vurgulanacak terim varken etkindir; diğer
@@ -68,10 +73,19 @@ struct ReadingPane: View {
                     FlowLayout(spacing: 6, lineSpacing: 6) {
                         Chip(text: hit.mailbox, systemImage: "tray")
                         ForEach(hit.attachments, id: \.self) { name in
+                            // Sol tık: eki aç (mevcut davranış). Sağ tık: Hızlı Bak / Eki aç.
                             Button { model.openAttachment(named: name) } label: {
                                 Chip(text: name, systemImage: "paperclip")
                             }
                             .buttonStyle(.plain).help("Eki aç")
+                            .contextMenu {
+                                Button { model.quickLookAttachment(named: name) } label: {
+                                    Label("Hızlı Bak", systemImage: "eye")
+                                }
+                                Button { model.openAttachment(named: name) } label: {
+                                    Label("Eki aç", systemImage: "arrow.up.right.square")
+                                }
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

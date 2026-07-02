@@ -87,6 +87,7 @@ final class AppModel {
     var attachmentKind: AttachmentKind?            // seçili kategori filtresi (nil → tümü)
     var attachmentKindCounts: [AttachmentKind: Int] = [:]   // kategori çiplerindeki sayılar
     var isLoadingAttachments = false               // ek listesi yüklenirken iskelet göstermek için
+    var quickLookURL: URL?                          // Hızlı Bak (Quick Look) önizlemesi için geçici dosya URL'i
 
     // Sağlık / kurulum (HealthCheck girdileri)
     var llmConfigured = false
@@ -663,28 +664,48 @@ final class AppModel {
         }
     }
 
+    /// Verilen `.emlx` dosyasından adı eşleşen eki geçici bir dosyaya çıkarır ve URL'ini döndürür (yoksa nil).
+    /// Dosya adını güvenli kılar (yol bileşeni kaçışını önler). Eki açma ve Hızlı Bak akışları ortak kullanır.
+    nonisolated private static func extractAttachmentToTempFile(fromEMLXPath path: String,
+                                                                named name: String) throws -> URL? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        guard let att = EMLXParser.extractAttachments(data: data)
+            .first(where: { $0.filename == name }) else { return nil }
+        // Dosya adını güvenli kıl (yol bileşeni kaçışını önle).
+        let safe = (att.filename as NSString).lastPathComponent
+        let fileName = safe.isEmpty ? "ek" : safe
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("trova-ekler", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fileURL = dir.appendingPathComponent(fileName)
+        try att.data.write(to: fileURL)
+        return fileURL
+    }
+
     /// Bir ek satırını açar: sahip `.emlx`'ten eki ada göre çıkarıp geçici dosyaya yazar ve sistemde açar.
     /// (Mevcut `extractAttachments` akışını yeniden kullanır; satır zaten `filePath` taşır.)
     func openAttachmentRow(_ row: AttachmentRow) {
         Task {
-            let result = await background { () -> URL? in
-                guard let data = try? Data(contentsOf: URL(fileURLWithPath: row.filePath)) else { return nil }
-                guard let att = EMLXParser.extractAttachments(data: data)
-                    .first(where: { $0.filename == row.fileName }) else { return nil }
-                // Dosya adını güvenli kıl (yol bileşeni kaçışını önle).
-                let safe = (att.filename as NSString).lastPathComponent
-                let fileName = safe.isEmpty ? "ek" : safe
-                let dir = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("trova-ekler", isDirectory: true)
-                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                let fileURL = dir.appendingPathComponent(fileName)
-                try att.data.write(to: fileURL)
-                return fileURL
+            let result = await background {
+                try Self.extractAttachmentToTempFile(fromEMLXPath: row.filePath, named: row.fileName)
             }
             guard let url = result.flatMap({ $0 }) else {
                 errorMessage = "Ek açılamadı: \(row.fileName)"; return
             }
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Bir ek satırını Hızlı Bak (Quick Look) ile önizler: eki geçici dosyaya çıkarıp `quickLookURL`'ü kurar.
+    func quickLookAttachment(row: AttachmentRow) {
+        Task {
+            let result = await background {
+                try Self.extractAttachmentToTempFile(fromEMLXPath: row.filePath, named: row.fileName)
+            }
+            guard let url = result.flatMap({ $0 }) else {
+                errorMessage = "Ek önizlenemedi: \(row.fileName)"; return
+            }
+            quickLookURL = url
         }
     }
 
@@ -1374,24 +1395,35 @@ final class AppModel {
         Task {
             let result = await background { () -> URL? in
                 let store = try IndexStore(path: AppPaths.databaseURL)
-                guard let path = try store.filePath(forID: id),
-                      let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
-                guard let att = EMLXParser.extractAttachments(data: data)
-                    .first(where: { $0.filename == name }) else { return nil }
-                // Dosya adını güvenli kıl (yol bileşeni kaçışını önle).
-                let safe = (att.filename as NSString).lastPathComponent
-                let fileName = safe.isEmpty ? "ek" : safe
-                let dir = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("trova-ekler", isDirectory: true)
-                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                let fileURL = dir.appendingPathComponent(fileName)
-                try att.data.write(to: fileURL)
-                return fileURL
+                guard let path = try store.filePath(forID: id) else { return nil }
+                return try Self.extractAttachmentToTempFile(fromEMLXPath: path, named: name)
             }
             guard let url = result.flatMap({ $0 }) else {
                 errorMessage = "Ek açılamadı: \(name)"; return
             }
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Seçili mailden verilen adlı eki Hızlı Bak (Quick Look) ile önizler.
+    func quickLookAttachment(named name: String) {
+        guard let id = selection else { return }
+        quickLookAttachment(named: name, messageID: id)
+    }
+
+    /// Belirli bir mailden (id) verilen adlı eki geçici dosyaya çıkarıp Hızlı Bak ile önizler.
+    /// Seçili maile bağlı değildir; okuma paneli çiplerinden doğrudan önizlemek için.
+    func quickLookAttachment(named name: String, messageID id: String) {
+        Task {
+            let result = await background { () -> URL? in
+                let store = try IndexStore(path: AppPaths.databaseURL)
+                guard let path = try store.filePath(forID: id) else { return nil }
+                return try Self.extractAttachmentToTempFile(fromEMLXPath: path, named: name)
+            }
+            guard let url = result.flatMap({ $0 }) else {
+                errorMessage = "Ek önizlenemedi: \(name)"; return
+            }
+            quickLookURL = url
         }
     }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import QuickLook   // .quickLookPreview(_:) modifier'ı için
 import TrovaCore
 
 // MARK: - Ekler sütunu
@@ -45,6 +46,7 @@ struct AttachmentsColumn: View {
                         ForEach(model.attachments) { row in
                             AttachmentRowView(row: row,
                                               open: { model.openAttachmentRow(row) },
+                                              quickLook: { model.quickLookAttachment(row: row) },
                                               openInMail: { model.openRowInMail(row) })
                         }
                     }
@@ -53,6 +55,10 @@ struct AttachmentsColumn: View {
             }
         }
         .background(Theme.surface)
+        // Hızlı Bak önizlemesini bu sütunda bağlarız. Bölümler karşılıklı dışlar (ContentView `else if`
+        // zinciri) → Ekler ve okuma paneli aynı anda hiyerarşide olmaz; her sütun tetikleyicisine yakın
+        // kendi binding'ini taşır ve çakışmaz.
+        .quickLookPreview($model.quickLookURL)
         .task { model.loadAttachments() }
     }
 }
@@ -115,7 +121,9 @@ private struct AttachmentKindChip: View {
 private struct AttachmentRowView: View {
     let row: AttachmentRow
     let open: () -> Void
+    let quickLook: () -> Void
     let openInMail: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: open) {
@@ -144,6 +152,14 @@ private struct AttachmentRowView: View {
                         .font(.mono(10)).foregroundStyle(Theme.faint)
                         .help(RelativeTime.absolute(date))
                 }
+                // Hover'da beliren "göz": Hızlı Bak. Satırın ana tıklaması değişmez (eki açar).
+                if hovering {
+                    Button(action: quickLook) {
+                        Image(systemName: "eye")
+                            .font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    }
+                    .buttonStyle(.plain).help("Hızlı Bak")
+                }
                 Image(systemName: "arrow.up.right.square")
                     .font(.system(size: 11)).foregroundStyle(Theme.faint)
             }
@@ -152,8 +168,10 @@ private struct AttachmentRowView: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.line, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
         .help("Eki aç: \(row.fileName)")
         .contextMenu {
+            Button { quickLook() } label: { Label("Hızlı Bak", systemImage: "eye") }
             Button { open() } label: { Label("Eki aç", systemImage: "arrow.up.right.square") }
             Button { openInMail() } label: { Label("Mail'de Aç", systemImage: "arrow.up.forward.app") }
         }
