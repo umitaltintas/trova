@@ -160,25 +160,29 @@ public struct SearchFilter: Sendable, Equatable {
     public var accountID: String?
     public var since: Date?
     public var until: Date?
-    public var fromContains: String?      // gönderen adı/e-postasında geçen metin (from: operatörü)
+    public var fromContains: String?      // gönderen adı/e-postasında geçen metin (kimden:/from: operatörü)
+    public var mailboxContains: String?   // posta kutusu adında geçen metin (kutu:/mailbox: operatörü; parça, büyük/küçük harf duyarsız)
     public var hasAttachment: Bool        // yalnızca ekli mailler (has:attachment operatörü)
     public var attachmentKind: AttachmentKind?  // yalnızca belirli türde eki olan mailler (has:pdf gibi; nil → etkisiz)
     public var unreadOnly: Bool           // yalnızca okunmamış mailler (isRead = 0)
     public var flaggedOnly: Bool          // yalnızca bayraklı mailler (isFlagged = 1)
     public var pinnedOnly: Bool           // yalnızca Trova-yerel yıldızlı (pinned) mailler
     public init(accountID: String? = nil, since: Date? = nil, until: Date? = nil,
-                fromContains: String? = nil, hasAttachment: Bool = false,
+                fromContains: String? = nil, mailboxContains: String? = nil,
+                hasAttachment: Bool = false,
                 attachmentKind: AttachmentKind? = nil,
                 unreadOnly: Bool = false, flaggedOnly: Bool = false,
                 pinnedOnly: Bool = false) {
         self.accountID = accountID; self.since = since; self.until = until
-        self.fromContains = fromContains; self.hasAttachment = hasAttachment
+        self.fromContains = fromContains; self.mailboxContains = mailboxContains
+        self.hasAttachment = hasAttachment
         self.attachmentKind = attachmentKind
         self.unreadOnly = unreadOnly; self.flaggedOnly = flaggedOnly
         self.pinnedOnly = pinnedOnly
     }
     public var isEmpty: Bool {
         accountID == nil && since == nil && until == nil && fromContains == nil
+            && mailboxContains == nil
             && !hasAttachment && attachmentKind == nil && !unreadOnly && !flaggedOnly && !pinnedOnly
     }
 }
@@ -1266,6 +1270,13 @@ public final class IndexStore: Sendable {
         if let from = filter.fromContains, !from.isEmpty {
             parts.append("(m.fromName LIKE ? OR m.fromAddress LIKE ?)")
             args.append("%\(from)%"); args.append("%\(from)%")
+        }
+        // Posta kutusu daraltması (kutu:/mailbox: operatörü): parça eşleşme, LIKE ile büyük/küçük
+        // harf duyarsız (ASCII katlaması). Mailbox adı yol bileşenlerinden türer (örn. "INBOX",
+        // "Arşiv", "[Gmail]/All Mail"); parça arama iç içe kutu adlarını da yakalar.
+        if let mailbox = filter.mailboxContains, !mailbox.isEmpty {
+            parts.append("m.mailbox LIKE ?")
+            args.append("%\(mailbox)%")
         }
         if filter.hasAttachment {
             parts.append("(m.attachments IS NOT NULL AND m.attachments <> '')")

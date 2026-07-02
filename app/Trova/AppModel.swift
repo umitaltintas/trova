@@ -137,7 +137,8 @@ final class AppModel {
     var selectedMessageID: String?       // seçili mailin RFC822 Message-ID'si ("Mail'de Aç" için)
     var isSearching = false
     var detectedDateLabel: String?       // sorgudan algılanan Türkçe tarih ifadesi etiketi (örn. "son 7 gün")
-    var searchFromLabel: String?         // from:/gönderen: operatörü etiketi
+    var searchFromLabel: String?         // kimden:/from: operatörü etiketi
+    var searchMailboxLabel: String?      // kutu:/mailbox: operatörü etiketi (çip için)
     var searchHasAttachment = false      // has:attachment operatörü etkin mi
     var searchAttachmentKind: AttachmentKind?   // has:<tür> operatörüyle seçilen ek türü (çip için)
     var expansionChips: [String] = []    // PRF ile sorguya eklenen terimler (gösterim)
@@ -1174,6 +1175,7 @@ final class AppModel {
         let quick = activeQuickDate.map { QuickDate.range($0, now: Date(), calendar: .current) }
         detectedDateLabel = activeQuickDate?.label ?? parsed.hint?.label
         searchFromLabel = ops.fromContains
+        searchMailboxLabel = ops.mailboxContains
         searchHasAttachment = ops.hasAttachment
         searchAttachmentKind = ops.attachmentKind
         let q = parsed.hint != nil ? parsed.cleaned : ops.cleaned
@@ -1186,7 +1188,8 @@ final class AppModel {
         let until = quick?.until ?? parsed.hint?.until
         let filter = SearchFilter(
             accountID: filterAccount.isEmpty ? nil : filterAccount, since: since, until: until,
-            fromContains: ops.fromContains, hasAttachment: ops.hasAttachment,
+            fromContains: ops.fromContains, mailboxContains: ops.mailboxContains,
+            hasAttachment: ops.hasAttachment,
             attachmentKind: ops.attachmentKind,
             unreadOnly: unreadOnly, flaggedOnly: flaggedOnly, pinnedOnly: pinnedOnly)
         // PRF (sorgu genişletme) ayarı: açıksa ilk sonuçlardan terim çıkarıp sorguya eklenir.

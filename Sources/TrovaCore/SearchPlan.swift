@@ -26,7 +26,8 @@ public enum SearchPlanner {
         let filter = SearchFilter(
             accountID: nil,
             since: parsed.hint?.since, until: parsed.hint?.until,
-            fromContains: ops.fromContains, hasAttachment: ops.hasAttachment,
+            fromContains: ops.fromContains, mailboxContains: ops.mailboxContains,
+            hasAttachment: ops.hasAttachment,
             attachmentKind: ops.attachmentKind,
             unreadOnly: false, flaggedOnly: false)
         return SearchPlan(ftsQuery: ftsQuery, filter: filter)

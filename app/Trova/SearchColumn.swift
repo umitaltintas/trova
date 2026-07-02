@@ -13,6 +13,7 @@ struct SearchColumn: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
                 TextField("Mailde ara…", text: $model.query)
                     .textFieldStyle(.plain).font(.system(size: 14)).onSubmit { model.runSearch() }
+                    .help("Operatörler: kimden:, kutu:, ek: — örn. kimden:\"Ali Veli\" kutu:INBOX ek:pdf fatura")
                 Picker("", selection: $model.mode) {
                     Text("Hibrit").tag(SearchMode.hybrid)
                     Text("Anlamsal").tag(SearchMode.semantic)
@@ -109,12 +110,14 @@ struct SearchColumn: View {
             .padding(.horizontal, 14).padding(.top, 8)
 
             if model.detectedDateLabel != nil || model.searchFromLabel != nil
+                || model.searchMailboxLabel != nil
                 || model.searchHasAttachment || model.searchAttachmentKind != nil
                 || !model.expansionChips.isEmpty {
                 // Algılanan filtre + sorgu-genişletme çipleri; çok sayıda olunca alt satıra sarar.
                 FlowLayout(spacing: 6, lineSpacing: 6) {
                     if let label = model.detectedDateLabel { Chip(text: label, systemImage: "calendar") }
                     if let from = model.searchFromLabel { Chip(text: from, systemImage: "person") }
+                    if let mailbox = model.searchMailboxLabel { Chip(text: "Kutu: \(mailbox)", systemImage: "tray") }
                     if model.searchHasAttachment { Chip(text: "ekli", systemImage: "paperclip") }
                     if let kind = model.searchAttachmentKind {
                         Chip(text: "Ek türü: \(kind.label)", systemImage: kind.systemImage)

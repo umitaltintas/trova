@@ -39,8 +39,11 @@ yalnızca oluşturma penceresini açar (otomatik **göndermez**); yıldızlama T
 - **Ara** — kelime / anlamsal / hibrit. Güçlü sorgu dili:
   - Türkçe **doğal dil tarih** filtresi: `son 7 gün fatura`, `dün toplantı`, `geçen ay maaş`;
     ayrıca tek tıkla **hızlı tarih çipleri** (bugün · 7g · 30g · bu yıl).
-  - **Operatörler**: `from:ali` / `gönderen:veli`, `has:attachment` / `has:ek`, ve ek türü
-    `has:pdf` · `ek:görsel` · `tür:tablo` (PDF · Görsel · Tablo · Belge · Sunum · Arşiv · Ses · Video · Kod).
+  - **Alan operatörleri** (Türkçe birincil, İngilizce eş anlamlı): `kimden:`/`from:` (gönderen),
+    `kutu:`/`mailbox:` (posta kutusu), `ek:`/`attachment:` (ek türü). Değer tırnaklı olabilir ve
+    operatör adı büyük/küçük harf duyarsızdır — örn. `kimden:"Ali Veli" kutu:INBOX ek:pdf fatura`.
+    Ayrıca `has:attachment` / `has:ek` (herhangi ek) ve tür belirteçleri `has:pdf` · `ek:görsel` ·
+    `tür:tablo` (PDF · Görsel · Tablo · Belge · Sunum · Arşiv · Ses · Video · Kod).
     Gelişmiş sözdizimi: `"tam ifade"` ve `-dışlanan` terim.
   - **Snippet + terim vurgusu**, opsiyonel **PRF sorgu genişletme**, thread çeşitlendirme,
     opsiyonel **AI yeniden sıralama (reranking)**.
