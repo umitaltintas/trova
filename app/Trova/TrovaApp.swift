@@ -3,6 +3,8 @@ import SwiftUI
 @main
 struct TrovaApp: App {
     @State private var model = AppModel()
+    // Menü çubuğu eki görünür mü (Ayarlar → Genel'den açılıp kapanır). Varsayılan açık.
+    @AppStorage("menuBarExtra") private var menuBarExtra = true
 
     init() {
         // KÖK NEDEN DÜZELTMESİ: AppKit, NSSplitView'lerin alt-görünüm yüksekliklerini otomatik
@@ -21,7 +23,9 @@ struct TrovaApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        // id="ana": menü çubuğu eki bu pencereyi öne getirebilmek için kimliğe ihtiyaç duyar
+        // (openWindow(id:) hedefi). Min/ideal boyutlar ve geri-yükleme davranışı değişmez.
+        WindowGroup(id: "ana") {
             ContentView()
                 .environment(model)
                 // Pencere min boyutu: kısa ekranlarda da çalışsın diye yükseklik 520'ye çekildi.
@@ -30,6 +34,17 @@ struct TrovaApp: App {
                 .frame(minWidth: 820, minHeight: 520)
         }
         .defaultSize(width: 1200, height: 780)
+
+        // Menü çubuğu eki: yeni mail rozeti ikonu + kompakt pencerede hızlı arama ve tek-tık eylemler.
+        // Aynı AppModel örneğini paylaşır; `menuBarExtra` bayrağı kapalıysa status item hiç eklenmez.
+        MenuBarExtra(isInserted: $menuBarExtra) {
+            MenuBarView()
+                .environment(model)
+        } label: {
+            // Yeni mail varsa dolu tepsi ikonu; yoksa boş tepsi.
+            Label("Trova", systemImage: model.newMailCount > 0 ? "tray.full.fill" : "tray")
+        }
+        .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView()

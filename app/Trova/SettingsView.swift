@@ -13,6 +13,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKeys.queryExpansion) private var queryExpansion = false
     @AppStorage(SettingsKeys.streamAnswers) private var streamAnswers = true
     @AppStorage(SettingsKeys.indexAttachmentContent) private var indexAttachmentContent = false
+    @AppStorage("menuBarExtra") private var menuBarExtra = true
 
     @Environment(AppModel.self) private var model
 
@@ -25,6 +26,17 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
+            Form {
+                Toggle("Menü çubuğunda göster", isOn: $menuBarExtra)
+                    .help("Trova simgesini menü çubuğunda gösterir; oradan hızlı arama, bugün "
+                        + "brifingi ve indeksleme tek tıkla erişilir.")
+                Text("Menü çubuğu eki; yeni mail geldiğinde ikonda rozet gösterir ve ana pencereyi "
+                   + "hızlıca öne getirmenizi sağlar.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .tabItem { Label("Genel", systemImage: "gearshape") }
+            .padding()
+
             Form {
                 Picker("Sağlayıcı", selection: $embedProvider) {
                     Text("Yerel (offline, ücretsiz)").tag("local")
