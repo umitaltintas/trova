@@ -119,6 +119,9 @@ open Trova.xcodeproj           # Xcode'da ⌘R (otomatik imza)
    dışarı çıkmaz. Model varlıkları **bir kez** indirilir (Ayarlar › Embedding'den; ilk gömmede de
    istenir). Token vektörleri mean-pool + L2 normalize edilir; sıralama kalitesi bulut modellerinden
    düşüktür, bu yüzden `semantic` tek başına güvenilmez — `hybrid`'de FTS taşır, reranking/PRF telafi eder.
+   Modelin token sınırını aşan uzun mailler artık kelime bazlı parçalanıp parça vektörleri ağırlıklı
+   ortalanır (eskiden kuyruk sessizce düşüyordu); daha önce gömdüyseniz en iyi sonuç için Gömme'yi
+   yeniden çalıştırın (`trova embed --reset`). Eski ve yeni vektörler aynı uzayda karşılaştırılabilir.
 2. **Bulut API (OpenRouter / OpenAI / Voyage)** — yüksek kaliteli çok dilli modeller, **önerilen**.
    OpenRouter OpenAI-uyumlu `/embeddings` sunduğundan tek `OPENROUTER_API_KEY` hem gömme hem
    `ask`/`agent` (LLM) için kullanılabilir. (Uygulamada Ayarlar'dan, CLI'da ortam değişkenleriyle.)

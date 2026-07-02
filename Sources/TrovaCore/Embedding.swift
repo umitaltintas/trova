@@ -21,7 +21,9 @@ public extension EmbeddingProvider {
 /// dilli modele çözülür (mailler karışık dilli); model kimliğini/boyutunu değiştirmemek
 /// için bilerek dil-bazlı kurucu korunur (bkz. VectorMath / message_vector boyut filtresi).
 /// Token vektörleri ortalanıp (mean-pool) L2 normalize edilir; böylece nokta çarpımı
-/// doğrudan kosinüs benzerliğini verir. Boyut çalışma zamanında modelden alınır.
+/// doğrudan kosinüs benzerliğini verir. Boyut çalışma zamanında modelden alınır. Modelin
+/// token sınırını (~256) aşan uzun metin, `WordChunker` ile kelime bazlı parçalanır; parça
+/// vektörleri token sayısıyla ağırlıklı ortalanıp yeniden normalize edilir (kuyruk kaybolmaz).
 public final class LocalEmbeddingProvider: EmbeddingProvider, @unchecked Sendable {
     public enum Failure: Error, LocalizedError {
         case modelUnavailable   // bu macOS/dil için model hiç kurulamıyor
@@ -88,11 +90,44 @@ public final class LocalEmbeddingProvider: EmbeddingProvider, @unchecked Sendabl
     }
 
     public func embed(_ text: String) throws -> [Float] {
-        let input = String(text.prefix(2000))   // ~512 token sınırı için kırp
-        guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return [Float](repeating: 0, count: dimension)
+        // Metni token sınırına saygıyla kelime bazlı parçala (bkz. WordChunker). Eskiden
+        // `prefix(2000)` ile karakter bazlı kırpılıyordu; 2000 karakter Türkçe'de 256 token'ı
+        // aştığından uzun maillerin kuyruğu sessizce düşüyordu.
+        let pieces = WordChunker.chunks(text)
+        guard !pieces.isEmpty else {
+            return [Float](repeating: 0, count: dimension)   // boş / yalnız boşluk metin
         }
 
+        // Tek parça: mevcut mean-pool yoluyla birebir aynı sonuç (regresyon yok).
+        if pieces.count == 1 {
+            return try embedChunk(pieces[0]).vector
+        }
+
+        // Çok parça: her parçayı ayrı göm, parça vektörlerini modelin ürettiği token sayısıyla
+        // ağırlıklı ortala (daha uzun parça daha çok ağırlık), sonucu L2 normalize et. Böylece
+        // sonuç, tüm metni tek seferde gömmenin mean-pool'una yaklaşırken boyut 512 kalır.
+        var accumulator = [Float](repeating: 0, count: dimension)
+        var weightSum: Float = 0
+        for piece in pieces {
+            let (vector, tokens) = try embedChunk(piece)
+            guard tokens > 0 else { continue }
+            let weight = Float(tokens)
+            for i in accumulator.indices { accumulator[i] += weight * vector[i] }
+            weightSum += weight
+        }
+        guard weightSum > 0 else { return accumulator }
+
+        var norm: Float = 0
+        for value in accumulator { norm += value * value }
+        norm = norm.squareRoot()
+        if norm > 0 { for i in accumulator.indices { accumulator[i] /= norm } }
+        return accumulator
+    }
+
+    /// Token sınırına sığan tek bir parçayı gömer: token vektörlerini ortalar (mean-pool) ve
+    /// L2 normalize eder. Dönüş: (normalize vektör, ortalamaya giren token sayısı). Token sayısı
+    /// çok parçalı gömmede ağırlık olarak kullanılır. Girdi boşsa sıfır vektör + 0 token döner.
+    private func embedChunk(_ input: String) throws -> (vector: [Float], tokens: Int) {
         lock.lock()
         defer { lock.unlock() }
 
@@ -104,12 +139,12 @@ public final class LocalEmbeddingProvider: EmbeddingProvider, @unchecked Sendabl
             count += 1
             return true
         }
-        guard count > 0 else { return sum }
+        guard count > 0 else { return (sum, 0) }
 
         var norm: Float = 0
         for i in sum.indices { sum[i] /= Float(count); norm += sum[i] * sum[i] }
         norm = norm.squareRoot()
         if norm > 0 { for i in sum.indices { sum[i] /= norm } }
-        return sum
+        return (sum, count)
     }
 }

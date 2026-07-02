@@ -54,4 +54,50 @@ final class ContextualEmbedderTests: XCTestCase {
         XCTAssertGreaterThan(related, unrelated,
             "Benzer çift (\(related)) alakasız çiftten (\(unrelated)) yüksek olmalı.")
     }
+
+    /// Modelin token sınırını aşacak kadar uzun (parçalamayı tetikleyen) bir metnin gömmesi de
+    /// boyut olarak doğru ve L2 normalize (~1.0) olmalıdır — çok parçalı ağırlıklı ortalama yolu.
+    func testLongTextEmbeddingIsNormalized() throws {
+        let provider = try makeProvider()
+        let long = Self.longTurkishText
+        XCTAssertGreaterThan(WordChunker.chunks(long).count, 1,
+            "Test metni birden çok parçaya bölünmeli (parçalama yolu tetiklenmeli).")
+
+        let v = try provider.embed(long)
+        XCTAssertEqual(v.count, provider.dimension)
+        let norm = v.reduce(0) { $0 + $1 * $1 }.squareRoot()
+        XCTAssertEqual(norm, 1.0, accuracy: 1e-3, "L2 norm ~1.0 olmalı, oldu: \(norm)")
+    }
+
+    /// Uzun bir metnin (çok parçalı) gömmesi, kendi ilk parçasının gömmesine, alakasız bir
+    /// metinden belirgin biçimde daha yakın olmalı — parçalama anlamı korur, bozmaz.
+    func testLongTextCloserToOwnFirstChunkThanUnrelated() throws {
+        let provider = try makeProvider()
+        let long = Self.longTurkishText
+        let pieces = WordChunker.chunks(long)
+        XCTAssertGreaterThan(pieces.count, 1)
+
+        let whole = try provider.embed(long)
+        let firstChunk = try provider.embed(pieces[0])
+        let unrelated = try provider.embed(
+            "Kızarmış patates için patatesleri ince ince dilimleyin, tuzlayıp kızgın yağda kızartın.")
+
+        let ownChunk = cosine(whole, firstChunk)
+        let toUnrelated = cosine(whole, unrelated)
+        XCTAssertGreaterThan(ownChunk, toUnrelated,
+            "Uzun metin kendi ilk parçasına (\(ownChunk)) alakasızdan (\(toUnrelated)) yakın olmalı.")
+    }
+
+    /// Parçalamayı tetiklemeye yetecek (>120 kelime) tutarlı Türkçe metin: aynı konulu bir
+    /// paragrafın birkaç kez tekrarı — hem sınırı aşar hem de ilk parçayla konu bütünlüğü taşır.
+    private static let longTurkishText: String = {
+        let paragraph = """
+        Bu hafta yürüttüğümüz proje toplantısında ekip üyeleri yol haritasını gözden geçirdi ve \
+        önümüzdeki çeyrek için öncelikleri belirledi. Mühendisler yeni arama özelliğinin performansını \
+        ölçtü, tasarımcılar kullanıcı arayüzü taslaklarını sundu, proje yöneticisi ise teslim tarihlerini \
+        ve olası riskleri paylaştı. Toplantı sonunda herkesin görev listesi güncellendi ve bir sonraki \
+        değerlendirme için ortak bir takvim oluşturuldu.
+        """
+        return Array(repeating: paragraph, count: 4).joined(separator: " ")
+    }()
 }
