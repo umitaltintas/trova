@@ -22,7 +22,11 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     // Bildirim izni reddedilmiş mi — açılışta ve toggle değişince async kontrol edilir (.task/onChange).
-    @State private var notificationDenied = false
+    // İki toggle (yeni-mail bildirimi + otomatik brifing) aynı sistem iznini paylaşsa da uyarıları
+    // AYRI durumlarda tutulur: her toggle yalnız KENDİ altında ve yalnız KENDİSİ açıkken uyarır;
+    // böylece birinin izin denetimi diğerinin uyarısını tetiklemez.
+    @State private var newMailNotificationDenied = false
+    @State private var digestNotificationDenied = false
 
     // Anahtarlar init'te DEĞİL, açıldıktan sonra ana thread dışında yüklenir (aşağıdaki .task).
     // Senkron `Keychain.get` init'ten çağrılsaydı, yeniden imzalama sonrası onay diyaloğu
@@ -66,16 +70,16 @@ struct SettingsView: View {
                         if enabled {
                             Task {
                                 let granted = await MailNotifier.requestAuthorizationIfNeeded()
-                                notificationDenied = !granted
+                                newMailNotificationDenied = !granted
                             }
                         } else {
-                            notificationDenied = false
+                            newMailNotificationDenied = false
                         }
                     }
                 Text("Otomatik senkron açıkken yeni mail geldiğinde macOS bildirimi ve Dock rozeti "
                    + "gösterir.")
                     .font(.caption).foregroundStyle(.secondary)
-                if notificationDenied {
+                if newMailNotificationDenied {
                     Text("Bildirim izni reddedilmiş — Sistem Ayarları > Bildirimler'den açabilirsiniz.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -89,8 +93,10 @@ struct SettingsView: View {
                             // Toggle açılınca bildirim izni iste (Iter 63 kalıbı).
                             Task {
                                 let granted = await MailNotifier.requestAuthorizationIfNeeded()
-                                notificationDenied = !granted
+                                digestNotificationDenied = !granted
                             }
+                        } else {
+                            digestNotificationDenied = false
                         }
                     }
                 if autoDigest {
@@ -101,6 +107,10 @@ struct SettingsView: View {
                 Text("Belirlenen saatte Bugün brifingini oluşturur ve bildirim gösterir "
                    + "(uygulama açıkken).")
                     .font(.caption).foregroundStyle(.secondary)
+                if digestNotificationDenied {
+                    Text("Bildirim izni reddedilmiş — Sistem Ayarları > Bildirimler'den açabilirsiniz.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             .tabItem { Label("Genel", systemImage: "gearshape") }
             .padding()
@@ -300,9 +310,12 @@ struct SettingsView: View {
             embedKey = await Keychain.readAsync(KeychainKeys.embedKey)
             llmKey = await Keychain.readAsync(KeychainKeys.llmKey)
             keysLoaded = true
-            // Bildirim açıksa mevcut izin durumunu kontrol et: reddedilmişse toggle altında uyar.
-            if notifyNewMail {
-                notificationDenied = await MailNotifier.authorizationStatus() == .denied
+            // Bildirim gerektiren toggle'lar açıksa mevcut izin durumunu kontrol et: reddedilmişse
+            // her toggle KENDİ altında uyarır (tek sistem izni, iki bağımsız görünürlük).
+            if notifyNewMail || autoDigest {
+                let denied = await MailNotifier.authorizationStatus() == .denied
+                if notifyNewMail { newMailNotificationDenied = denied }
+                if autoDigest { digestNotificationDenied = denied }
             }
         }
     }
